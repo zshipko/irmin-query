@@ -5,18 +5,6 @@ module type QUERY = sig
 
   type lazy_value = unit -> Store.Contents.t Lwt.t
 
-  module Results : sig
-    type 'a t
-
-    val iter : ('a -> unit Lwt.t) -> 'a t -> unit Lwt.t
-
-    val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t Lwt.t
-
-    val fold : ('a -> 'b -> 'b Lwt.t) -> 'a t -> 'b -> 'b Lwt.t
-
-    val to_seq : 'a t -> 'a Seq.t
-  end
-
   module Settings : sig
     type t = {
       depth : int option;
@@ -47,16 +35,28 @@ module type QUERY = sig
     val f : 'a t -> 'a f
   end
 
+  module Results : sig
+    type 'a t = 'a Seq.t
+
+    val iter : ('a -> unit Lwt.t) -> 'a t -> unit Lwt.t
+
+    val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t Lwt.t
+
+    val fold : ('a -> 'b -> 'b Lwt.t) -> 'a t -> 'b -> 'b Lwt.t
+
+    val count : 'a t -> int
+  end
+
   val keys : ?settings:Settings.t -> Store.t -> Store.Key.t Seq.t Lwt.t
 
-  val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Results.t Lwt.t
+  val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Seq.t Lwt.t
 
   val filter :
     filter:Filter.t ->
     'a Iter.t ->
     ?settings:Settings.t ->
     Store.t ->
-    'a Results.t Lwt.t
+    'a Seq.t Lwt.t
 end
 
 module type VALUE = sig
@@ -66,18 +66,6 @@ end
 module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
   QUERY with module Store = Store = struct
   module Store = Store
-
-  module Results = struct
-    type 'a t = 'a list
-
-    let iter = Lwt_list.iter_s
-
-    let map = Lwt_list.map_s
-
-    let fold f stream x = Lwt_list.fold_left_s (fun acc x -> f x acc) x stream
-
-    let to_seq = List.to_seq
-  end
 
   module Filter = struct
     module Cache = struct
@@ -127,6 +115,39 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
     let default = { depth = None; prefix = None; initial_key = Store.Key.empty }
   end
 
+  module Results = struct
+    type 'a t = 'a Seq.t
+
+    let rec iter f = function
+      | Seq.Nil -> Lwt.return ()
+      | Seq.Cons (x, seq) ->
+          let* () = f x in
+          iter f (seq ())
+
+    let iter f stream = iter f (stream ())
+
+    let rec map f = function
+      | Seq.Nil -> Lwt.return Seq.Nil
+      | Seq.Cons (x, seq) ->
+          let* x = f x in
+          let+ i = map f (seq ()) in
+          Seq.Cons (x, fun () -> i)
+
+    let map f stream =
+      let+ i = map f (stream ()) in
+      fun () -> i
+
+    let rec fold f stream x =
+      match stream () with
+      | Seq.Nil -> Lwt.return x
+      | Seq.Cons (x', seq) ->
+          let* x = f x' x in
+          fold f seq x
+
+    let rec count stream =
+      match stream () with Seq.Nil -> 0 | Seq.Cons (_, seq) -> 1 + count seq
+  end
+
   type lazy_value = unit -> Store.Contents.t Lwt.t
 
   let find_value store key : lazy_value = fun () -> Store.get store key
@@ -161,7 +182,7 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
     in
     inner settings.initial_key 0 Seq.empty
 
-  let iter' f store results =
+  let iter' f store results : 'a Seq.t Lwt.t =
     let pure = Iter.pure f in
     let cache = Iter.cache f in
     let f = Iter.f f in
@@ -174,30 +195,38 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
           Hashtbl.replace cache head ht;
           ht
     in
-    Lwt_list.map_s
-      (fun k ->
-        match (pure, Hashtbl.find_opt cache k) with
-        | true, Some x -> Lwt.return x
-        | true, None ->
-            let* v = find_value store k () in
-            let+ x = f k v in
-            Hashtbl.replace cache k x;
-            x
-        | _ ->
-            let* v = find_value store k () in
-            f k v)
-      results
+    let rec inner seq =
+      match seq with
+      | Seq.Nil -> Lwt.return Seq.Nil
+      | Seq.Cons (k, seq) ->
+          let* s = inner (seq ()) in
+          let* x =
+            match (pure, Hashtbl.find_opt cache k) with
+            | true, Some x -> Lwt.return x
+            | true, None ->
+                let* v = find_value store k () in
+                let+ x = f k v in
+                Hashtbl.replace cache k x;
+                x
+            | _ ->
+                let* v = find_value store k () in
+                f k v
+          in
+          Lwt.return @@ Seq.Cons (x, fun () -> s)
+    in
+    let+ x = inner (results ()) in
+    fun () -> x
 
   let iter (f : 'a Iter.t) ?settings store =
     let* keys = keys ?settings store in
-    iter' f store (List.of_seq keys)
+    iter' f store keys
 
   let filter :
       filter:Filter.t ->
       'a Iter.t ->
       ?settings:Settings.t ->
       Store.t ->
-      'a Results.t Lwt.t =
+      'a Seq.t Lwt.t =
    fun ~filter f ?settings store ->
     let* head = Store.Head.get store in
     let cache = Filter.cache filter in
@@ -211,11 +240,12 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
           ht
     in
     let* keys = keys ?settings store in
-    let* x =
-      Lwt_list.filter_s
-        (fun k ->
+    let rec inner seq =
+      match seq () with
+      | Seq.Nil -> Lwt.return Seq.Nil
+      | Seq.Cons (k, seq) ->
           let v = find_value store k in
-          let+ (ok : bool) =
+          let* (ok : bool) =
             match Hashtbl.find_opt filter_cache k with
             | Some ok -> Lwt.return ok
             | None ->
@@ -223,8 +253,9 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
                 let () = Hashtbl.replace filter_cache k ok in
                 ok
           in
-          ok)
-        (List.of_seq keys)
+          let* i = inner seq in
+          if ok then Lwt.return @@ Seq.Cons (k, fun () -> i) else inner seq
     in
-    iter' f store x
+    let* x = inner keys in
+    iter' f store (fun () -> x)
 end

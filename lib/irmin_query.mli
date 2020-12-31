@@ -3,18 +3,6 @@ module type QUERY = sig
 
   type lazy_value = unit -> Store.Contents.t Lwt.t
 
-  module Results : sig
-    type 'a t
-
-    val iter : ('a -> unit Lwt.t) -> 'a t -> unit Lwt.t
-
-    val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t Lwt.t
-
-    val fold : ('a -> 'b -> 'b Lwt.t) -> 'a t -> 'b -> 'b Lwt.t
-
-    val to_seq : 'a t -> 'a Seq.t
-  end
-
   module Settings : sig
     type t = {
       depth : int option;
@@ -45,16 +33,28 @@ module type QUERY = sig
     val f : 'a t -> 'a f
   end
 
+  module Results : sig
+    type 'a t = 'a Seq.t
+
+    val iter : ('a -> unit Lwt.t) -> 'a t -> unit Lwt.t
+
+    val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t Lwt.t
+
+    val fold : ('a -> 'b -> 'b Lwt.t) -> 'a t -> 'b -> 'b Lwt.t
+
+    val count : 'a t -> int
+  end
+
   val keys : ?settings:Settings.t -> Store.t -> Store.Key.t Seq.t Lwt.t
 
-  val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Results.t Lwt.t
+  val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Seq.t Lwt.t
 
   val filter :
     filter:Filter.t ->
     'a Iter.t ->
     ?settings:Settings.t ->
     Store.t ->
-    'a Results.t Lwt.t
+    'a Seq.t Lwt.t
 end
 
 module type VALUE = sig
