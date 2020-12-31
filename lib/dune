@@ -1,0 +1,4 @@
+(library
+ (name irmin_query)
+ (public_name irmin-query)
+ (libraries irmin))
