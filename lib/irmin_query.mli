@@ -1,12 +1,18 @@
 module type QUERY = sig
   module Store : Irmin.S
 
+  type lazy_value = unit -> Store.Contents.t Lwt.t
+
   module Results : sig
     type 'a t
 
     val iter : ('a -> unit Lwt.t) -> 'a t -> unit Lwt.t
 
+    val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t Lwt.t
+
     val fold : ('a -> 'b -> 'b Lwt.t) -> 'a t -> 'b -> 'b Lwt.t
+
+    val to_seq : 'a t -> 'a Seq.t
   end
 
   module Settings : sig
@@ -20,7 +26,7 @@ module type QUERY = sig
   end
 
   module Filter : sig
-    type f = Store.key -> (unit -> Store.contents Lwt.t) -> bool Lwt.t
+    type f = Store.key -> lazy_value -> bool Lwt.t
 
     type t
 
@@ -38,8 +44,6 @@ module type QUERY = sig
 
     val f : 'a t -> 'a f
   end
-
-  type lazy_value = unit -> Store.Contents.t Lwt.t
 
   val keys : ?settings:Settings.t -> Store.t -> Store.Key.t Seq.t Lwt.t
 

@@ -3,12 +3,18 @@ open Lwt.Syntax
 module type QUERY = sig
   module Store : Irmin.S
 
+  type lazy_value = unit -> Store.Contents.t Lwt.t
+
   module Results : sig
     type 'a t
 
     val iter : ('a -> unit Lwt.t) -> 'a t -> unit Lwt.t
 
+    val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t Lwt.t
+
     val fold : ('a -> 'b -> 'b Lwt.t) -> 'a t -> 'b -> 'b Lwt.t
+
+    val to_seq : 'a t -> 'a Seq.t
   end
 
   module Settings : sig
@@ -22,7 +28,7 @@ module type QUERY = sig
   end
 
   module Filter : sig
-    type f = Store.key -> (unit -> Store.contents Lwt.t) -> bool Lwt.t
+    type f = Store.key -> lazy_value -> bool Lwt.t
 
     type t
 
@@ -40,8 +46,6 @@ module type QUERY = sig
 
     val f : 'a t -> 'a f
   end
-
-  type lazy_value = unit -> Store.Contents.t Lwt.t
 
   val keys : ?settings:Settings.t -> Store.t -> Store.Key.t Seq.t Lwt.t
 
@@ -64,11 +68,15 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
   module Store = Store
 
   module Results = struct
-    type 'a t = 'a Lwt_stream.t
+    type 'a t = 'a list
 
-    let iter = Lwt_stream.iter_s
+    let iter = Lwt_list.iter_s
 
-    let fold = Lwt_stream.fold_s
+    let map = Lwt_list.map_s
+
+    let fold f stream x = Lwt_list.fold_left_s (fun acc x -> f x acc) x stream
+
+    let to_seq = List.to_seq
   end
 
   module Filter = struct
@@ -153,11 +161,11 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
     in
     inner settings.initial_key 0 Seq.empty
 
-  let iter' f store stream =
+  let iter' f store results =
     let pure = Iter.pure f in
     let cache = Iter.cache f in
     let f = Iter.f f in
-    let+ head = Store.Head.get store in
+    let* head = Store.Head.get store in
     let cache : (Store.key, 'a) Hashtbl.t =
       match Hashtbl.find_opt cache head with
       | Some x -> x
@@ -166,7 +174,7 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
           Hashtbl.replace cache head ht;
           ht
     in
-    Lwt_stream.map_s
+    Lwt_list.map_s
       (fun k ->
         match (pure, Hashtbl.find_opt cache k) with
         | true, Some x -> Lwt.return x
@@ -178,12 +186,11 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
         | _ ->
             let* v = find_value store k () in
             f k v)
-      stream
+      results
 
   let iter (f : 'a Iter.t) ?settings store =
     let* keys = keys ?settings store in
-    let stream = Lwt_stream.of_seq keys in
-    iter' f store stream
+    iter' f store (List.of_seq keys)
 
   let filter :
       filter:Filter.t ->
@@ -204,19 +211,20 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
           ht
     in
     let* keys = keys ?settings store in
-    let stream = Lwt_stream.of_seq keys in
-    Lwt_stream.filter_s
-      (fun k ->
-        let v = find_value store k in
-        let+ (ok : bool) =
-          match Hashtbl.find_opt filter_cache k with
-          | Some ok -> Lwt.return ok
-          | None ->
-              let+ ok = filter k v in
-              let () = Hashtbl.replace filter_cache k ok in
-              ok
-        in
-        ok)
-      stream
-    |> iter' f store
+    let* x =
+      Lwt_list.filter_s
+        (fun k ->
+          let v = find_value store k in
+          let+ (ok : bool) =
+            match Hashtbl.find_opt filter_cache k with
+            | Some ok -> Lwt.return ok
+            | None ->
+                let+ ok = filter k v in
+                let () = Hashtbl.replace filter_cache k ok in
+                ok
+          in
+          ok)
+        (List.of_seq keys)
+    in
+    iter' f store x
 end
