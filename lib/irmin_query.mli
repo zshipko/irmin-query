@@ -1,7 +1,7 @@
 module type QUERY = sig
   module Store : Irmin.S
 
-  type lazy_value = unit -> Store.Contents.t Lwt.t
+  type lazy_value = Store.Contents.t Lwt.t lazy_t
 
   module Settings : sig
     type t = {
@@ -57,9 +57,4 @@ module type QUERY = sig
     'a Seq.t Lwt.t
 end
 
-module type VALUE = sig
-  type t
-end
-
-module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
-  QUERY with module Store = Store
+module Make (Store : Irmin.S) : QUERY with module Store = Store

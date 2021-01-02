@@ -3,7 +3,7 @@ open Lwt.Syntax
 module type QUERY = sig
   module Store : Irmin.S
 
-  type lazy_value = unit -> Store.Contents.t Lwt.t
+  type lazy_value = Store.Contents.t Lwt.t lazy_t
 
   module Settings : sig
     type t = {
@@ -59,20 +59,17 @@ module type QUERY = sig
     'a Seq.t Lwt.t
 end
 
-module type VALUE = sig
-  type t
-end
-
-module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
-  QUERY with module Store = Store = struct
+module Make (Store : Irmin.S) : QUERY with module Store = Store = struct
   module Store = Store
+
+  type lazy_value = Store.Contents.t Lwt.t lazy_t
 
   module Filter = struct
     module Cache = struct
       type t = (Store.commit, (Store.key, bool) Hashtbl.t) Hashtbl.t
     end
 
-    type f = Store.key -> (unit -> Store.contents Lwt.t) -> bool Lwt.t
+    type f = Store.key -> lazy_value -> bool Lwt.t
 
     type t = Cache.t * f
 
@@ -148,9 +145,8 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
       match stream () with Seq.Nil -> 0 | Seq.Cons (_, seq) -> 1 + count seq
   end
 
-  type lazy_value = unit -> Store.Contents.t Lwt.t
-
-  let find_value store key : lazy_value = fun () -> Store.get store key
+  let find_value store key : lazy_value =
+    Lazy.from_fun (fun () -> Store.get store key)
 
   let rec key_has_prefix ~prefix key =
     match prefix with
@@ -204,12 +200,12 @@ module Make (Store : Irmin.S) (Value : VALUE with type t = Store.Contents.t) :
             match (pure, Hashtbl.find_opt cache k) with
             | true, Some x -> Lwt.return x
             | true, None ->
-                let* v = find_value store k () in
+                let* v = Lazy.force @@ find_value store k in
                 let+ x = f k v in
                 Hashtbl.replace cache k x;
                 x
             | _ ->
-                let* v = find_value store k () in
+                let* v = Lazy.force @@ find_value store k in
                 f k v
           in
           Lwt.return @@ Seq.Cons (x, fun () -> s)
