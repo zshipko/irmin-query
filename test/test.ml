@@ -19,7 +19,7 @@ end
 module Store = Irmin_mem.KV (User)
 module Query = Irmin_query.Make (Store)
 
-let prefix x = { Query.Settings.default with prefix = Some x }
+let prefix ?limit x = { Query.Settings.default with prefix = Some x; limit }
 
 let rec add_random_users store prefix n =
   let user = User.random () in
@@ -66,6 +66,12 @@ let test_query store _ () =
   let count = Query.Results.count results in
   Alcotest.(check int "Query count" 0 count)
 
+let test_limit store _ () =
+  let iter = Query.Iter.v (fun k _v -> Lwt.return k) in
+  let+ results = Query.iter ~settings:(prefix ~limit:2 [ "user" ]) iter store in
+  let count = Query.Results.count results in
+  Alcotest.(check int "Limit count" 2 count)
+
 let main =
   let* store = init () in
   let* () = add_random_users store "user" 10 in
@@ -76,6 +82,7 @@ let main =
           Alcotest_lwt.test_case "key count" `Quick (test_key_count store);
           Alcotest_lwt.test_case "prefix" `Quick (test_prefix store);
           Alcotest_lwt.test_case "query" `Quick (test_query store);
+          Alcotest_lwt.test_case "limit" `Quick (test_limit store);
         ] );
     ]
 

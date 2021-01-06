@@ -1,20 +1,19 @@
 module type QUERY = sig
   module Store : Irmin.S
 
-  type lazy_value = Store.Contents.t Lwt.t lazy_t
-
   module Settings : sig
     type t = {
       depth : int option;
       prefix : Store.Key.t option;
-      initial_key : Store.Key.t;
+      root : Store.Key.t;
+      limit : int option;
     }
 
     val default : t
   end
 
   module Filter : sig
-    type f = Store.key -> lazy_value -> bool Lwt.t
+    type f = Store.key -> Store.Contents.t Lwt.t lazy_t -> bool Lwt.t
 
     type t
 
@@ -24,7 +23,7 @@ module type QUERY = sig
   end
 
   module Iter : sig
-    type 'a f = Store.key -> Store.contents -> 'a Lwt.t
+    type 'a f = Store.key -> Store.contents Lwt.t lazy_t -> 'a Lwt.t
 
     type 'a t
 
