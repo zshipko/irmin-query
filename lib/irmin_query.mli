@@ -44,16 +44,16 @@ module type QUERY = sig
     val count : 'a t -> int
   end
 
-  val keys : ?settings:Settings.t -> Store.t -> Store.Key.t Seq.t Lwt.t
+  val keys : ?settings:Settings.t -> Store.t -> Store.Key.t Results.t Lwt.t
 
-  val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Seq.t Lwt.t
+  val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Results.t Lwt.t
 
   val filter :
     filter:Filter.t ->
     'a Iter.t ->
     ?settings:Settings.t ->
     Store.t ->
-    'a Seq.t Lwt.t
+    'a Results.t Lwt.t
 end
 
 module Make (Store : Irmin.S) : QUERY with module Store = Store
