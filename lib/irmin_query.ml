@@ -1,62 +1,5 @@
 open Lwt.Syntax
-
-module type QUERY = sig
-  module Store : Irmin.S
-
-  module Settings : sig
-    type t = {
-      depth : int option;
-      prefix : Store.Key.t option;
-      root : Store.Key.t;
-      limit : int option;
-    }
-
-    val default : t
-  end
-
-  module Filter : sig
-    type f = Store.key -> Store.contents Lwt.t lazy_t -> bool Lwt.t
-
-    type t
-
-    val v : f -> t
-
-    val f : t -> f
-  end
-
-  module Iter : sig
-    type 'a f = Store.key -> Store.contents Lwt.t lazy_t -> 'a Lwt.t
-
-    type 'a t
-
-    val v : ?pure:bool -> 'a f -> 'a t
-
-    val f : 'a t -> 'a f
-  end
-
-  module Results : sig
-    type 'a t = 'a Seq.t
-
-    val iter : ('a -> unit Lwt.t) -> 'a t -> unit Lwt.t
-
-    val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t Lwt.t
-
-    val fold : ('a -> 'b -> 'b Lwt.t) -> 'a t -> 'b -> 'b Lwt.t
-
-    val count : 'a t -> int
-  end
-
-  val keys : ?settings:Settings.t -> Store.t -> Store.Key.t Results.t Lwt.t
-
-  val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Results.t Lwt.t
-
-  val filter :
-    filter:Filter.t ->
-    'a Iter.t ->
-    ?settings:Settings.t ->
-    Store.t ->
-    'a Results.t Lwt.t
-end
+include Irmin_query_intf
 
 module Make (X : Irmin.S) : QUERY with module Store = X = struct
   module Store = X
@@ -101,7 +44,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
 
   module Settings = struct
     type t = {
-      depth : int option;
+      depth : Store.Tree.depth option;
       prefix : Store.Key.t option;
       root : Store.Key.t;
       limit : int option;
@@ -144,37 +87,43 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       match stream () with Seq.Nil -> 0 | Seq.Cons (_, seq) -> 1 + count seq
   end
 
-  let find_value store key = Lazy.from_fun (fun () -> Store.get store key)
+  let get_value store key = Lazy.from_fun (fun () -> Store.get store key)
 
-  let rec key_has_prefix ~prefix key =
-    match prefix with
-    | Some prefix -> (
-        match (Store.Key.decons prefix, Store.Key.decons key) with
-        | Some (h, pr), Some (i, k) ->
-            let eq = Repr.unstage (Repr.equal Store.Key.step_t) in
-            eq h i && key_has_prefix ~prefix:(Some pr) k
-        | Some _, None -> false
-        | None, _ -> true )
-    | None -> true
+  let rec combine_keys prefix k =
+    match Store.Key.decons prefix with
+    | Some (step, key) -> combine_keys key (Store.Key.cons step k)
+    | None -> k
 
   let keys ?(settings = Settings.default) store : Store.key Seq.t Lwt.t =
-    let d = match settings.depth with Some x -> x | None -> 0 in
-    let rec inner key depth seq =
-      if d > 0 && depth >= d then Lwt.return seq
-      else
-        let* items = Store.list store key in
-        Lwt_list.fold_left_s
-          (fun acc (step, v) ->
-            match Store.Tree.inspect v with
-            | `Contents ->
-                let key' = Store.Key.rcons key step in
-                if key_has_prefix ~prefix:settings.prefix key' then
-                  Lwt.return (Seq.cons key' acc)
-                else Lwt.return acc
-            | `Node _ -> inner (Store.Key.rcons key step) (depth + 1) acc)
-          seq items
+    let* prefix, tree =
+      match settings.prefix with
+      | Some prefix ->
+          let+ t = Store.get_tree store prefix in
+          (prefix, t)
+      | None ->
+          let+ t = Store.tree store in
+          (Store.Key.empty, t)
     in
-    inner settings.root 0 Seq.empty
+    let contents key _ acc =
+      Lwt.return (Seq.cons (combine_keys prefix key) acc)
+    in
+    Store.Tree.fold ?depth:settings.depth tree ~contents Seq.empty
+
+  let items ?(settings = Settings.default) store :
+      (Store.key * Store.contents) Seq.t Lwt.t =
+    let* prefix, tree =
+      match settings.prefix with
+      | Some prefix ->
+          let+ t = Store.get_tree store prefix in
+          (prefix, t)
+      | None ->
+          let+ t = Store.tree store in
+          (Store.Key.empty, t)
+    in
+    let contents key c acc =
+      Lwt.return (Seq.cons (combine_keys prefix key, c) acc)
+    in
+    Store.Tree.fold ?depth:settings.depth tree ~contents Seq.empty
 
   let iter' ?settings f store results : 'a Seq.t Lwt.t =
     let settings =
@@ -204,12 +153,12 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
               match (pure, Hashtbl.find_opt cache k) with
               | true, Some x -> Lwt.return x
               | true, None ->
-                  let v = find_value store k in
+                  let v = get_value store k in
                   let+ x = f k v in
                   Hashtbl.replace cache k x;
                   x
               | _ ->
-                  let v = find_value store k in
+                  let v = get_value store k in
                   f k v
             in
             Lwt.return @@ Seq.Cons (x, fun () -> s)
@@ -244,7 +193,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       match seq () with
       | Seq.Nil -> Lwt.return Seq.Nil
       | Seq.Cons (k, seq) ->
-          let v = find_value store k in
+          let v = get_value store k in
           let* (ok : bool) =
             match Hashtbl.find_opt filter_cache k with
             | Some ok -> Lwt.return ok
