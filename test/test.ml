@@ -36,7 +36,10 @@ let init () =
 let get_users store prefix =
   let+ items = Store.list store [ prefix ] in
   List.filter_map
-    (function step, `Contents -> Some [ prefix; step ] | _ -> None)
+    (fun (step, x) ->
+      match Store.Tree.inspect x with
+      | `Contents -> Some [ prefix; step ]
+      | _ -> None)
     items
 
 let test_key_count store _ () =

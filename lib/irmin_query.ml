@@ -164,14 +164,14 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       else
         let* items = Store.list store key in
         Lwt_list.fold_left_s
-          (fun acc x ->
-            match x with
-            | step, `Contents ->
+          (fun acc (step, v) ->
+            match Store.Tree.inspect v with
+            | `Contents ->
                 let key' = Store.Key.rcons key step in
                 if key_has_prefix ~prefix:settings.prefix key' then
                   Lwt.return (Seq.cons key' acc)
                 else Lwt.return acc
-            | step, `Node -> inner (Store.Key.rcons key step) (depth + 1) acc)
+            | `Node _ -> inner (Store.Key.rcons key step) (depth + 1) acc)
           seq items
     in
     inner settings.root 0 Seq.empty
