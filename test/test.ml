@@ -57,11 +57,7 @@ let test_prefix store _ () =
   Alcotest.(check int "Prefix count" 10 count)
 
 let test_query store _ () =
-  let filter =
-    Query.Filter.v (fun _k v ->
-        let* v = Lazy.force v in
-        Lwt.return (v.User.age > 100))
-  in
+  let filter = Query.Filter.v (fun _k v -> Lwt.return (v.User.age > 100)) in
   let iter = Query.Iter.v (fun k _v -> Lwt.return k) in
   let+ results =
     Query.filter ~settings:(prefix [ "user" ]) ~filter iter store

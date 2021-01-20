@@ -13,7 +13,7 @@ module type QUERY = sig
   end
 
   module Filter : sig
-    type f = Store.key -> Store.contents Lwt.t lazy_t -> bool Lwt.t
+    type f = Store.key -> Store.contents -> bool Lwt.t
 
     type t
 
@@ -23,7 +23,7 @@ module type QUERY = sig
   end
 
   module Iter : sig
-    type 'a f = Store.key -> Store.contents Lwt.t lazy_t -> 'a Lwt.t
+    type 'a f = Store.key -> Store.contents -> 'a Lwt.t
 
     type 'a t
 

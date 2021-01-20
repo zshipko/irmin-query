@@ -9,7 +9,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       type t = (Store.commit, (Store.key, bool) Hashtbl.t) Hashtbl.t
     end
 
-    type f = Store.key -> Store.contents Lwt.t lazy_t -> bool Lwt.t
+    type f = Store.key -> Store.contents -> bool Lwt.t
 
     type t = Cache.t * f
 
@@ -27,7 +27,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       type 'a t = (Store.commit, (Store.key, 'a) Hashtbl.t) Hashtbl.t
     end
 
-    type 'a f = Store.key -> Store.contents Lwt.t lazy_t -> 'a Lwt.t
+    type 'a f = Store.key -> Store.contents -> 'a Lwt.t
 
     type 'a t = { cache : 'a Cache.t; f : 'a f; pure : bool }
 
@@ -87,8 +87,6 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       match stream () with Seq.Nil -> 0 | Seq.Cons (_, seq) -> 1 + count seq
   end
 
-  let get_value store key = Lazy.from_fun (fun () -> Store.get store key)
-
   let rec combine_keys prefix k =
     match Store.Key.decons prefix with
     | Some (step, key) -> combine_keys key (Store.Key.cons step k)
@@ -145,7 +143,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     let rec inner seq count =
       match seq with
       | Seq.Nil -> Lwt.return Seq.Nil
-      | Seq.Cons (k, seq) ->
+      | Seq.Cons ((k, v), seq) ->
           if limit > 0 && count >= limit then Lwt.return Seq.Nil
           else
             let* s = inner (seq ()) (count + 1) in
@@ -153,13 +151,10 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
               match (pure, Hashtbl.find_opt cache k) with
               | true, Some x -> Lwt.return x
               | true, None ->
-                  let v = get_value store k in
                   let+ x = f k v in
                   Hashtbl.replace cache k x;
                   x
-              | _ ->
-                  let v = get_value store k in
-                  f k v
+              | _ -> f k v
             in
             Lwt.return @@ Seq.Cons (x, fun () -> s)
     in
@@ -167,8 +162,8 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     fun () -> x
 
   let iter (f : 'a Iter.t) ?settings store =
-    let* keys = keys ?settings store in
-    iter' ?settings f store keys
+    let* items = items ?settings store in
+    iter' ?settings f store items
 
   let filter :
       filter:Filter.t ->
@@ -188,12 +183,11 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
           Hashtbl.replace cache head ht;
           ht
     in
-    let* keys = keys ?settings store in
+    let* items = items ?settings store in
     let rec inner seq =
       match seq () with
       | Seq.Nil -> Lwt.return Seq.Nil
-      | Seq.Cons (k, seq) ->
-          let v = get_value store k in
+      | Seq.Cons ((k, v), seq) ->
           let* (ok : bool) =
             match Hashtbl.find_opt filter_cache k with
             | Some ok -> Lwt.return ok
@@ -203,8 +197,8 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
                 ok
           in
           let* i = inner seq in
-          if ok then Lwt.return @@ Seq.Cons (k, fun () -> i) else inner seq
+          if ok then Lwt.return @@ Seq.Cons ((k, v), fun () -> i) else inner seq
     in
-    let* x = inner keys in
+    let* x = inner items in
     iter' ?settings f store (fun () -> x)
 end
