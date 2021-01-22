@@ -11,15 +11,17 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
 
     type f = Store.key -> Store.contents -> bool Lwt.t
 
-    type t = Cache.t * f
+    type t = { cache : Cache.t; f : f; pure : bool }
 
-    let v f =
+    let v ?(pure = true) f =
       let cache = Hashtbl.create 8 in
-      (cache, f)
+      { cache; f; pure }
 
-    let cache (cache, _) = cache
+    let cache { cache; _ } = cache
 
-    let f (_, f) = f
+    let f { f; _ } = f
+
+    let pure { pure; _ } = pure
   end
 
   module Iter = struct
@@ -145,7 +147,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
    fun ~filter f ?settings store ->
     let* head = Store.Head.get store in
     let cache = Filter.cache filter in
-    let filter = Filter.f filter in
+    let filter' = Filter.f filter in
     let filter_cache : (Store.key, bool) Hashtbl.t =
       match Hashtbl.find_opt cache head with
       | Some x -> x
@@ -161,12 +163,14 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       | Results.Nil -> Lwt.return Results.empty
       | Results.Cons ((k, v), seq) ->
           let* (ok : bool) =
-            match Hashtbl.find_opt filter_cache k with
-            | Some ok -> Lwt.return ok
-            | None ->
-                let+ ok = filter k v in
-                let () = Hashtbl.replace filter_cache k ok in
-                ok
+            if not (Filter.pure filter) then filter' k v
+            else
+              match Hashtbl.find_opt filter_cache k with
+              | Some ok -> Lwt.return ok
+              | None ->
+                  let+ ok = filter' k v in
+                  let () = Hashtbl.replace filter_cache k ok in
+                  ok
           in
           let* i = inner seq in
           if ok then Lwt.return @@ Results.cons (k, v) i else inner seq

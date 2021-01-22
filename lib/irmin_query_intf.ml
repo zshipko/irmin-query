@@ -17,7 +17,7 @@ module type QUERY = sig
 
     type t
 
-    val v : f -> t
+    val v : ?pure:bool -> f -> t
 
     val f : t -> f
   end
