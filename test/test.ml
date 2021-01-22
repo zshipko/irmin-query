@@ -21,6 +21,8 @@ module Query = Irmin_query.Make (Store)
 
 let prefix ?limit x = { Query.Settings.default with prefix = Some x; limit }
 
+let count t = Lwt_seq.fold_left (fun acc _ -> Lwt.return (acc + 1)) 0 t
+
 let rec add_random_users store prefix n =
   let user = User.random () in
   let info = Irmin_unix.info "Add user: %s" user.name in
@@ -43,32 +45,32 @@ let get_users store prefix =
     items
 
 let test_key_count store _ () =
-  let+ keys = Query.keys store in
-  let count = Query.Results.count keys in
+  let* keys = Query.keys store in
+  let+ count = count keys in
   Alcotest.(check int "Key count" 10 count)
 
 let test_prefix store _ () =
   let filter = Query.Filter.v (fun _k _v -> Lwt.return true) in
   let iter = Query.Iter.v (fun _k v -> Lwt.return v) in
-  let+ results =
+  let* results =
     Query.filter ~settings:(prefix [ "user" ]) ~filter iter store
   in
-  let count = Query.Results.count results in
+  let+ count = count results in
   Alcotest.(check int "Prefix count" 10 count)
 
 let test_query store _ () =
   let filter = Query.Filter.v (fun _k v -> Lwt.return (v.User.age > 100)) in
   let iter = Query.Iter.v (fun k _v -> Lwt.return k) in
-  let+ results =
+  let* results =
     Query.filter ~settings:(prefix [ "user" ]) ~filter iter store
   in
-  let count = Query.Results.count results in
+  let+ count = count results in
   Alcotest.(check int "Query count" 0 count)
 
 let test_limit store _ () =
   let iter = Query.Iter.v (fun k _v -> Lwt.return k) in
-  let+ results = Query.iter ~settings:(prefix ~limit:2 [ "user" ]) iter store in
-  let count = Query.Results.count results in
+  let* results = Query.iter ~settings:(prefix ~limit:2 [ "user" ]) iter store in
+  let+ count = count results in
   Alcotest.(check int "Limit count" 2 count)
 
 let main =

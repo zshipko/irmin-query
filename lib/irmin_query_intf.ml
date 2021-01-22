@@ -32,17 +32,7 @@ module type QUERY = sig
     val f : 'a t -> 'a f
   end
 
-  module Results : sig
-    type 'a t = 'a Seq.t
-
-    val iter : ('a -> unit Lwt.t) -> 'a t -> unit Lwt.t
-
-    val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t Lwt.t
-
-    val fold : ('a -> 'b -> 'b Lwt.t) -> 'a t -> 'b -> 'b Lwt.t
-
-    val count : 'a t -> int
-  end
+  module Results = Lwt_seq
 
   val keys : ?settings:Settings.t -> Store.t -> Store.key Results.t Lwt.t
 

@@ -54,45 +54,14 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       { depth = None; prefix = None; root = Store.Key.empty; limit = None }
   end
 
-  module Results = struct
-    type 'a t = 'a Seq.t
-
-    let rec iter f = function
-      | Seq.Nil -> Lwt.return ()
-      | Seq.Cons (x, seq) ->
-          let* () = f x in
-          iter f (seq ())
-
-    let iter f stream = iter f (stream ())
-
-    let rec map f = function
-      | Seq.Nil -> Lwt.return Seq.Nil
-      | Seq.Cons (x, seq) ->
-          let* x = f x in
-          let+ i = map f (seq ()) in
-          Seq.Cons (x, fun () -> i)
-
-    let map f stream =
-      let+ i = map f (stream ()) in
-      fun () -> i
-
-    let rec fold f stream x =
-      match stream () with
-      | Seq.Nil -> Lwt.return x
-      | Seq.Cons (x', seq) ->
-          let* x = f x' x in
-          fold f seq x
-
-    let rec count stream =
-      match stream () with Seq.Nil -> 0 | Seq.Cons (_, seq) -> 1 + count seq
-  end
+  module Results = Lwt_seq
 
   let rec combine_keys prefix k =
     match Store.Key.decons prefix with
     | Some (step, key) -> combine_keys key (Store.Key.cons step k)
     | None -> k
 
-  let keys ?(settings = Settings.default) store : Store.key Seq.t Lwt.t =
+  let keys ?(settings = Settings.default) store : Store.key Results.t Lwt.t =
     let* prefix, tree =
       match settings.prefix with
       | Some prefix ->
@@ -103,12 +72,12 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
           (Store.Key.empty, t)
     in
     let contents key _ acc =
-      Lwt.return (Seq.cons (combine_keys prefix key) acc)
+      Lwt.return (Results.cons (combine_keys prefix key) acc)
     in
-    Store.Tree.fold ?depth:settings.depth tree ~contents Seq.empty
+    Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty
 
   let items ?(settings = Settings.default) store :
-      (Store.key * Store.contents) Seq.t Lwt.t =
+      (Store.key * Store.contents) Results.t Lwt.t =
     let* prefix, tree =
       match settings.prefix with
       | Some prefix ->
@@ -119,11 +88,11 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
           (Store.Key.empty, t)
     in
     let contents key c acc =
-      Lwt.return (Seq.cons (combine_keys prefix key, c) acc)
+      Lwt.return (Results.cons (combine_keys prefix key, c) acc)
     in
-    Store.Tree.fold ?depth:settings.depth tree ~contents Seq.empty
+    Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty
 
-  let iter' ?settings f store results : 'a Seq.t Lwt.t =
+  let iter' ?settings f store results =
     let settings =
       match settings with Some x -> x | None -> Settings.default
     in
@@ -141,12 +110,13 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
           ht
     in
     let rec inner seq count =
+      let* seq = seq () in
       match seq with
-      | Seq.Nil -> Lwt.return Seq.Nil
-      | Seq.Cons ((k, v), seq) ->
-          if limit > 0 && count >= limit then Lwt.return Seq.Nil
+      | Results.Nil -> Lwt.return Results.empty
+      | Results.Cons ((k, v), seq) ->
+          if limit > 0 && count >= limit then Lwt.return Results.empty
           else
-            let* s = inner (seq ()) (count + 1) in
+            let* s = inner seq (count + 1) in
             let* x =
               match (pure, Hashtbl.find_opt cache k) with
               | true, Some x -> Lwt.return x
@@ -156,13 +126,14 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
                   x
               | _ -> f k v
             in
-            Lwt.return @@ Seq.Cons (x, fun () -> s)
+            Lwt.return @@ Results.cons x s
     in
-    let+ x = inner (results ()) 0 in
-    fun () -> x
+    inner results 0
 
-  let iter (f : 'a Iter.t) ?settings store =
-    let* items = items ?settings store in
+  let iter (f : 'a Iter.t) ?settings store : 'a Results.t Lwt.t =
+    let* (items : (Store.key * Store.contents) Results.t) =
+      items ?settings store
+    in
     iter' ?settings f store items
 
   let filter :
@@ -170,7 +141,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       'a Iter.t ->
       ?settings:Settings.t ->
       Store.t ->
-      'a Seq.t Lwt.t =
+      'a Results.t Lwt.t =
    fun ~filter f ?settings store ->
     let* head = Store.Head.get store in
     let cache = Filter.cache filter in
@@ -185,9 +156,10 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     in
     let* items = items ?settings store in
     let rec inner seq =
-      match seq () with
-      | Seq.Nil -> Lwt.return Seq.Nil
-      | Seq.Cons ((k, v), seq) ->
+      let* seq = seq () in
+      match seq with
+      | Results.Nil -> Lwt.return Results.empty
+      | Results.Cons ((k, v), seq) ->
           let* (ok : bool) =
             match Hashtbl.find_opt filter_cache k with
             | Some ok -> Lwt.return ok
@@ -197,8 +169,8 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
                 ok
           in
           let* i = inner seq in
-          if ok then Lwt.return @@ Seq.Cons ((k, v), fun () -> i) else inner seq
+          if ok then Lwt.return @@ Results.cons (k, v) i else inner seq
     in
     let* x = inner items in
-    iter' ?settings f store (fun () -> x)
+    iter' ?settings f store x
 end
