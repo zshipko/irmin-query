@@ -1,4 +1,5 @@
 (test
  (name test)
  (libraries irmin-unix irmin-query alcotest-lwt)
- (preprocess (pps ppx_irmin)))
+ (preprocess
+  (pps ppx_irmin)))
