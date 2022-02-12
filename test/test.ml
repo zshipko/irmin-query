@@ -4,7 +4,6 @@ module User = struct
   type t = { name : string; age : int } [@@deriving irmin]
 
   let merge = Irmin.Merge.(option (idempotent t))
-
   let chars = "abcdefghijklmopqrstuvwxyz"
 
   let random () =
@@ -16,23 +15,23 @@ module User = struct
     { name; age }
 end
 
-module Store = Irmin_mem.KV (User)
+module Store = Irmin_mem.KV.Make (User)
 module Query = Irmin_query.Make (Store)
+module Info = Irmin_unix.Info (Store.Info)
 
 let prefix ?limit x = { Query.Settings.default with prefix = Some x; limit }
-
-let count t = Lwt_seq.fold_left (fun acc _ -> Lwt.return (acc + 1)) 0 t
+let count t = Lwt_seq.fold_left_s (fun acc _ -> Lwt.return (acc + 1)) 0 t
 
 let rec add_random_users store prefix n =
   let user = User.random () in
-  let info = Irmin_unix.info "Add user: %s" user.name in
+  let info = Info.v "Add user: %s" user.name in
   let* () = Store.set_exn store ~info [ prefix; user.name ] user in
   if n - 1 > 0 then add_random_users store prefix (n - 1) else Lwt.return_unit
 
 let init () =
   let config = Irmin_mem.config () in
   let* repo = Store.Repo.v config in
-  let+ store = Store.master repo in
+  let+ store = Store.main repo in
   store
 
 let get_users store prefix =
@@ -45,7 +44,7 @@ let get_users store prefix =
     items
 
 let test_key_count store _ () =
-  let* keys = Query.keys store in
+  let* keys = Query.paths store in
   let+ count = count keys in
   Alcotest.(check int "Key count" 10 count)
 

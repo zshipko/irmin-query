@@ -4,8 +4,8 @@ module type QUERY = sig
   module Settings : sig
     type t = {
       depth : Store.Tree.depth option;
-      prefix : Store.Key.t option;
-      root : Store.Key.t;
+      prefix : Store.Path.t option;
+      root : Store.Path.t;
       limit : int option;
     }
 
@@ -13,33 +13,29 @@ module type QUERY = sig
   end
 
   module Filter : sig
-    type f = Store.key -> Store.contents -> bool Lwt.t
-
+    type f = Store.path -> Store.contents -> bool Lwt.t
     type t
 
     val v : ?pure:bool -> f -> t
-
     val f : t -> f
   end
 
   module Iter : sig
-    type 'a f = Store.key -> Store.contents -> 'a Lwt.t
-
+    type 'a f = Store.path -> Store.contents -> 'a Lwt.t
     type 'a t
 
     val v : ?pure:bool -> 'a f -> 'a t
-
     val f : 'a t -> 'a f
   end
 
   module Results = Lwt_seq
 
-  val keys : ?settings:Settings.t -> Store.t -> Store.key Results.t Lwt.t
+  val paths : ?settings:Settings.t -> Store.t -> Store.path Results.t Lwt.t
 
   val items :
     ?settings:Settings.t ->
     Store.t ->
-    (Store.key * Store.contents) Results.t Lwt.t
+    (Store.path * Store.contents) Results.t Lwt.t
 
   val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Results.t Lwt.t
 

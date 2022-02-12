@@ -6,11 +6,10 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
 
   module Filter = struct
     module Cache = struct
-      type t = (Store.commit, (Store.key, bool) Hashtbl.t) Hashtbl.t
+      type t = (Store.commit, (Store.path, bool) Hashtbl.t) Hashtbl.t
     end
 
-    type f = Store.key -> Store.contents -> bool Lwt.t
-
+    type f = Store.path -> Store.contents -> bool Lwt.t
     type t = { cache : Cache.t; f : f; pure : bool }
 
     let v ?(pure = true) f =
@@ -18,19 +17,16 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       { cache; f; pure }
 
     let cache { cache; _ } = cache
-
     let f { f; _ } = f
-
     let pure { pure; _ } = pure
   end
 
   module Iter = struct
     module Cache = struct
-      type 'a t = (Store.commit, (Store.key, 'a) Hashtbl.t) Hashtbl.t
+      type 'a t = (Store.commit, (Store.path, 'a) Hashtbl.t) Hashtbl.t
     end
 
-    type 'a f = Store.key -> Store.contents -> 'a Lwt.t
-
+    type 'a f = Store.path -> Store.contents -> 'a Lwt.t
     type 'a t = { cache : 'a Cache.t; f : 'a f; pure : bool }
 
     let v ?(pure = true) f =
@@ -38,32 +34,30 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
       { cache; f; pure }
 
     let f { f; _ } = f
-
     let cache { cache; _ } = cache
-
     let pure { pure; _ } = pure
   end
 
   module Settings = struct
     type t = {
       depth : Store.Tree.depth option;
-      prefix : Store.Key.t option;
-      root : Store.Key.t;
+      prefix : Store.Path.t option;
+      root : Store.Path.t;
       limit : int option;
     }
 
     let default =
-      { depth = None; prefix = None; root = Store.Key.empty; limit = None }
+      { depth = None; prefix = None; root = Store.Path.empty; limit = None }
   end
 
   module Results = Lwt_seq
 
-  let rec combine_keys prefix k =
-    match Store.Key.decons prefix with
-    | Some (step, key) -> combine_keys key (Store.Key.cons step k)
+  let rec combine_paths prefix k =
+    match Store.Path.decons prefix with
+    | Some (step, path) -> combine_paths path (Store.Path.cons step k)
     | None -> k
 
-  let keys ?(settings = Settings.default) store : Store.key Results.t Lwt.t =
+  let paths ?(settings = Settings.default) store : Store.path Results.t Lwt.t =
     let* prefix, tree =
       match settings.prefix with
       | Some prefix ->
@@ -71,15 +65,15 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
           (prefix, t)
       | None ->
           let+ t = Store.tree store in
-          (Store.Key.empty, t)
+          (Store.Path.empty, t)
     in
-    let contents key _ acc =
-      Lwt.return (Results.cons (combine_keys prefix key) acc)
+    let contents path _ acc =
+      Lwt.return (Results.cons (combine_paths prefix path) acc)
     in
     Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty
 
   let items ?(settings = Settings.default) store :
-      (Store.key * Store.contents) Results.t Lwt.t =
+      (Store.path * Store.contents) Results.t Lwt.t =
     let* prefix, tree =
       match settings.prefix with
       | Some prefix ->
@@ -87,10 +81,10 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
           (prefix, t)
       | None ->
           let+ t = Store.tree store in
-          (Store.Key.empty, t)
+          (Store.Path.empty, t)
     in
-    let contents key c acc =
-      Lwt.return (Results.cons (combine_keys prefix key, c) acc)
+    let contents path c acc =
+      Lwt.return (Results.cons (combine_paths prefix path, c) acc)
     in
     Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty
 
@@ -103,7 +97,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     let cache = Iter.cache f in
     let f = Iter.f f in
     let* head = Store.Head.get store in
-    let cache : (Store.key, 'a) Hashtbl.t =
+    let cache : (Store.path, 'a) Hashtbl.t =
       match Hashtbl.find_opt cache head with
       | Some x -> x
       | None ->
@@ -133,7 +127,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     inner results 0
 
   let iter (f : 'a Iter.t) ?settings store : 'a Results.t Lwt.t =
-    let* (items : (Store.key * Store.contents) Results.t) =
+    let* (items : (Store.path * Store.contents) Results.t) =
       items ?settings store
     in
     iter' ?settings f store items
@@ -148,7 +142,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     let* head = Store.Head.get store in
     let cache = Filter.cache filter in
     let filter' = Filter.f filter in
-    let filter_cache : (Store.key, bool) Hashtbl.t =
+    let filter_cache : (Store.path, bool) Hashtbl.t =
       match Hashtbl.find_opt cache head with
       | Some x -> x
       | None ->
