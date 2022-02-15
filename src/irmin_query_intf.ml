@@ -37,9 +37,9 @@ module type QUERY = sig
     Store.t ->
     (Store.path * Store.contents) Results.t Lwt.t
 
-  val iter : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Results.t Lwt.t
+  val map : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Results.t Lwt.t
 
-  val filter :
+  val filter_map :
     filter:Filter.t ->
     'a Iter.t ->
     ?settings:Settings.t ->

@@ -126,13 +126,13 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     in
     inner results 0
 
-  let iter (f : 'a Iter.t) ?settings store : 'a Results.t Lwt.t =
+  let map (f : 'a Iter.t) ?settings store : 'a Results.t Lwt.t =
     let* (items : (Store.path * Store.contents) Results.t) =
       items ?settings store
     in
     iter' ?settings f store items
 
-  let filter :
+  let filter_map :
       filter:Filter.t ->
       'a Iter.t ->
       ?settings:Settings.t ->
