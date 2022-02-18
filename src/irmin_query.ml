@@ -171,4 +171,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     in
     let* x = inner items in
     iter' ?settings f store x
+
+  let reduce f results init =
+    Lwt_seq.fold_left_s (fun acc x -> f x acc) init results
 end

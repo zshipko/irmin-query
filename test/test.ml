@@ -19,7 +19,7 @@ module Store = Irmin_mem.KV.Make (User)
 module Query = Irmin_query.Make (Store)
 
 let prefix ?limit x = { Query.Settings.default with prefix = Some x; limit }
-let count t = Lwt_seq.fold_left_s (fun acc _ -> Lwt.return (acc + 1)) 0 t
+let count t = Query.reduce (fun _ acc -> Lwt.return (acc + 1)) t 0
 
 let rec add_random_users store prefix n =
   let user = User.random () in

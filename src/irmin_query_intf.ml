@@ -45,6 +45,8 @@ module type QUERY = sig
     ?settings:Settings.t ->
     Store.t ->
     'a Results.t Lwt.t
+
+  val reduce : ('a -> 'b -> 'b Lwt.t) -> 'a Results.t -> 'b -> 'b Lwt.t
 end
 
 module type Irmin_query = sig
