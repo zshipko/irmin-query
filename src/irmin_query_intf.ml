@@ -5,8 +5,8 @@ module type S = sig
     type t = {
       depth : Store.Tree.depth option;
       prefix : Store.Path.t option;
-      root : Store.Path.t;
       limit : int option;
+      order : [ `Random of Random.State.t | `Sorted | `Undefined ];
     }
 
     val default : t

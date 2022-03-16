@@ -42,12 +42,12 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     type t = {
       depth : Store.Tree.depth option;
       prefix : Store.Path.t option;
-      root : Store.Path.t;
       limit : int option;
+      order : [ `Random of Random.State.t | `Sorted | `Undefined ];
     }
 
     let default =
-      { depth = None; prefix = None; root = Store.Path.empty; limit = None }
+      { depth = None; prefix = None; limit = None; order = `Undefined }
   end
 
   module Results = Lwt_seq
@@ -70,7 +70,8 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     let contents path _ acc =
       Lwt.return (Results.cons (combine_paths prefix path) acc)
     in
-    Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty
+    Store.Tree.fold ~order:settings.order ?depth:settings.depth tree ~contents
+      Results.empty
 
   let items ?(settings = Settings.default) store :
       (Store.path * Store.contents) Results.t Lwt.t =
@@ -83,17 +84,23 @@ module Make (X : Irmin.S) : S with module Store = X = struct
           let+ t = Store.tree store in
           (Store.Path.empty, t)
     in
-    let contents path c acc =
-      Lwt.return (Results.cons (combine_paths prefix path, c) acc)
-    in
-    Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty
-
-  let iter' (type a) ?settings (f : a Iter.t) store
-      (results : (Store.path * Store.contents) Results.t) =
-    let settings =
-      match settings with Some x -> x | None -> Settings.default
-    in
+    let exception Return of (Store.path * Store.contents) Results.t in
+    let count = ref 0 in
     let limit = match settings.limit with Some x -> x | None -> 0 in
+    let contents path c acc =
+      if Option.is_some settings.limit && !count >= limit then
+        raise (Return acc)
+      else
+        let () = incr count in
+        Lwt.return (Results.cons (combine_paths prefix path, c) acc)
+    in
+    Lwt.catch
+      (fun () ->
+        Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty)
+      (function Return acc -> Lwt.return acc | exn -> raise exn)
+
+  let iter' (type a) (f : a Iter.t) store
+      (results : (Store.path * Store.contents) Results.t) =
     let pure = Iter.pure f in
     let cache = Iter.cache f in
     let f = Iter.f f in
@@ -106,21 +113,17 @@ module Make (X : Irmin.S) : S with module Store = X = struct
           Hashtbl.replace cache head ht;
           ht
     in
-    let count = ref 0 in
     let inner (k, v) : a option Lwt.t =
-      if limit > 0 && !count >= limit then Lwt.return_none
-      else
-        let () = incr count in
-        let* x =
-          match (pure, Hashtbl.find_opt cache k) with
-          | true, Some x -> Lwt.return x
-          | true, None ->
-              let+ x = f k v in
-              Hashtbl.replace cache k x;
-              x
-          | _ -> f k v
-        in
-        Lwt.return_some x
+      let* x =
+        match (pure, Hashtbl.find_opt cache k) with
+        | true, Some x -> Lwt.return x
+        | true, None ->
+            let+ x = f k v in
+            Hashtbl.replace cache k x;
+            x
+        | _ -> f k v
+      in
+      Lwt.return_some x
     in
     Lwt.return @@ Results.filter_map_s inner results
 
@@ -128,7 +131,7 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     let* (items : (Store.path * Store.contents) Results.t) =
       items ?settings store
     in
-    iter' ?settings f store items
+    iter' f store items
 
   let filter_map :
       filter:Filter.t ->
@@ -148,7 +151,6 @@ module Make (X : Irmin.S) : S with module Store = X = struct
           Hashtbl.replace cache head ht;
           ht
     in
-    let* items = items ?settings store in
     let inner (k, v) : bool Lwt.t =
       let* (ok : bool) =
         if not (Filter.pure filter) then filter' k v
@@ -162,8 +164,9 @@ module Make (X : Irmin.S) : S with module Store = X = struct
       in
       Lwt.return ok
     in
+    let* items = items ?settings store in
     let x = Results.filter_s inner items in
-    iter' ?settings f store x
+    iter' f store x
 
   let reduce f results init =
     Results.fold_left_s (fun acc x -> f x acc) init results
