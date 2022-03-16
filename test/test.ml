@@ -45,7 +45,7 @@ let get_users store prefix =
 let test_key_count store _ () =
   let* keys = Query.paths store in
   let+ count = count keys in
-  Alcotest.(check int "Key count" 10 count)
+  Alcotest.(check int "Key count" 40 count)
 
 let test_prefix store _ () =
   let filter = Query.Filter.v (fun _k _v -> Lwt.return true) in
@@ -54,7 +54,7 @@ let test_prefix store _ () =
     Query.filter_map ~settings:(prefix [ "user" ]) ~filter iter store
   in
   let+ count = count results in
-  Alcotest.(check int "Prefix count" 10 count)
+  Alcotest.(check int "Prefix count" 20 count)
 
 let test_query store _ () =
   let filter = Query.Filter.v (fun _k v -> Lwt.return (v.User.age > 100)) in
@@ -73,7 +73,8 @@ let test_limit store _ () =
 
 let main =
   let* store = init () in
-  let* () = add_random_users store "user" 10 in
+  let* () = add_random_users store "user" 20 in
+  let* () = add_random_users store "test" 20 in
   Alcotest_lwt.run "query"
     [
       ( "user",

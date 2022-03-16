@@ -1,7 +1,7 @@
 open Lwt.Syntax
 include Irmin_query_intf
 
-module Make (X : Irmin.S) : QUERY with module Store = X = struct
+module Make (X : Irmin.S) : S with module Store = X = struct
   module Store = X
 
   module Filter = struct
@@ -88,7 +88,8 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     in
     Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty
 
-  let iter' ?settings f store results =
+  let iter' (type a) ?settings (f : a Iter.t) store
+      (results : (Store.path * Store.contents) Results.t) =
     let settings =
       match settings with Some x -> x | None -> Settings.default
     in
@@ -97,7 +98,7 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
     let cache = Iter.cache f in
     let f = Iter.f f in
     let* head = Store.Head.get store in
-    let cache : (Store.path, 'a) Hashtbl.t =
+    let cache : (Store.path, a) Hashtbl.t =
       match Hashtbl.find_opt cache head with
       | Some x -> x
       | None ->
@@ -105,26 +106,23 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
           Hashtbl.replace cache head ht;
           ht
     in
-    let rec inner seq count =
-      let* seq = seq () in
-      match seq with
-      | Results.Nil -> Lwt.return Results.empty
-      | Results.Cons ((k, v), seq) ->
-          if limit > 0 && count >= limit then Lwt.return Results.empty
-          else
-            let* s = inner seq (count + 1) in
-            let* x =
-              match (pure, Hashtbl.find_opt cache k) with
-              | true, Some x -> Lwt.return x
-              | true, None ->
-                  let+ x = f k v in
-                  Hashtbl.replace cache k x;
-                  x
-              | _ -> f k v
-            in
-            Lwt.return @@ Results.cons x s
+    let count = ref 0 in
+    let inner (k, v) : a option Lwt.t =
+      if limit > 0 && !count >= limit then Lwt.return_none
+      else
+        let () = incr count in
+        let* x =
+          match (pure, Hashtbl.find_opt cache k) with
+          | true, Some x -> Lwt.return x
+          | true, None ->
+              let+ x = f k v in
+              Hashtbl.replace cache k x;
+              x
+          | _ -> f k v
+        in
+        Lwt.return_some x
     in
-    inner results 0
+    Lwt.return @@ Results.filter_map_s inner results
 
   let map (f : 'a Iter.t) ?settings store : 'a Results.t Lwt.t =
     let* (items : (Store.path * Store.contents) Results.t) =
@@ -151,27 +149,22 @@ module Make (X : Irmin.S) : QUERY with module Store = X = struct
           ht
     in
     let* items = items ?settings store in
-    let rec inner seq =
-      let* seq = seq () in
-      match seq with
-      | Results.Nil -> Lwt.return Results.empty
-      | Results.Cons ((k, v), seq) ->
-          let* (ok : bool) =
-            if not (Filter.pure filter) then filter' k v
-            else
-              match Hashtbl.find_opt filter_cache k with
-              | Some ok -> Lwt.return ok
-              | None ->
-                  let+ ok = filter' k v in
-                  let () = Hashtbl.replace filter_cache k ok in
-                  ok
-          in
-          let* i = inner seq in
-          if ok then Lwt.return @@ Results.cons (k, v) i else inner seq
+    let inner (k, v) : bool Lwt.t =
+      let* (ok : bool) =
+        if not (Filter.pure filter) then filter' k v
+        else
+          match Hashtbl.find_opt filter_cache k with
+          | Some ok -> Lwt.return ok
+          | None ->
+              let+ ok = filter' k v in
+              let () = Hashtbl.replace filter_cache k ok in
+              ok
+      in
+      Lwt.return ok
     in
-    let* x = inner items in
+    let x = Results.filter_s inner items in
     iter' ?settings f store x
 
   let reduce f results init =
-    Lwt_seq.fold_left_s (fun acc x -> f x acc) init results
+    Results.fold_left_s (fun acc x -> f x acc) init results
 end

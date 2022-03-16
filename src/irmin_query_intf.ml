@@ -1,4 +1,4 @@
-module type QUERY = sig
+module type S = sig
   module Store : Irmin.S
 
   module Settings : sig
@@ -50,7 +50,7 @@ module type QUERY = sig
 end
 
 module type Irmin_query = sig
-  module type QUERY = QUERY
+  module type S = S
 
-  module Make : functor (X : Irmin.S) -> QUERY with module Store = X
+  module Make : functor (X : Irmin.S) -> S with module Store = X
 end
