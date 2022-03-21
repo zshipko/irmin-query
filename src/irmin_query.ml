@@ -57,22 +57,6 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     | Some (step, path) -> combine_paths path (Store.Path.cons step k)
     | None -> k
 
-  let paths ?(settings = Settings.default) store : Store.path Results.t Lwt.t =
-    let* prefix, tree =
-      match settings.prefix with
-      | Some prefix ->
-          let+ t = Store.get_tree store prefix in
-          (prefix, t)
-      | None ->
-          let+ t = Store.tree store in
-          (Store.Path.empty, t)
-    in
-    let contents path _ acc =
-      Lwt.return (Results.cons (combine_paths prefix path) acc)
-    in
-    Store.Tree.fold ~order:settings.order ?depth:settings.depth tree ~contents
-      Results.empty
-
   let items ?(settings = Settings.default) store :
       (Store.path * Store.contents) Results.t Lwt.t =
     let* prefix, tree =
@@ -96,8 +80,13 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     in
     Lwt.catch
       (fun () ->
-        Store.Tree.fold ?depth:settings.depth tree ~contents Results.empty)
+        Store.Tree.fold ~order:settings.order ?depth:settings.depth tree
+          ~contents Results.empty)
       (function Return acc -> Lwt.return acc | exn -> raise exn)
+
+  let paths ?settings store =
+    let+ x = items ?settings store in
+    Lwt_seq.map fst x
 
   let iter' (type a) (f : a Iter.t) store
       (results : (Store.path * Store.contents) Results.t) =
