@@ -1,3 +1,3 @@
 # irmin-query
 
-Provides an interface for querying [irmin](https://irmin.io) datastores using `Irmin.Tree.fold`
+Provides an interface to simplify querying [irmin](https://irmin.io) stores

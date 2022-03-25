@@ -1,4 +1,4 @@
-Copyright (c) 2020 Zach Shipko
+Copyright (c) 2022 Zach Shipko
 
 Permission to use, copy, modify, and/or distribute this software for any
 purpose with or without fee is hereby granted, provided that the above
