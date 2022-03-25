@@ -4,41 +4,22 @@ include Irmin_query_intf
 module Make (X : Irmin.S) : S with module Store = X = struct
   module Store = X
 
-  module Filter = struct
-    module Cache = struct
-      type t = (Store.commit, (Store.path, bool) Hashtbl.t) Hashtbl.t
-    end
-
-    type f = Store.path -> Store.contents -> bool Lwt.t
-    type t = { cache : Cache.t; f : f; pure : bool }
-
-    let v ?(pure = true) f =
-      let cache = Hashtbl.create 8 in
-      { cache; f; pure }
-
-    let cache { cache; _ } = cache
-    let f { f; _ } = f
-    let pure { pure; _ } = pure
+  module Cache = struct
+    type 'a t = (Store.commit, (Store.path, 'a option) Hashtbl.t) Hashtbl.t
   end
 
-  module Iter = struct
-    module Cache = struct
-      type 'a t = (Store.commit, (Store.path, 'a) Hashtbl.t) Hashtbl.t
-    end
+  type 'a f = Store.path -> Store.contents -> 'a option Lwt.t
+  type 'a t = { cache : 'a Cache.t; f : 'a f; pure : bool }
 
-    type 'a f = Store.path -> Store.contents -> 'a Lwt.t
-    type 'a t = { cache : 'a Cache.t; f : 'a f; pure : bool }
+  let v ?(pure = true) f =
+    let cache = Hashtbl.create 8 in
+    { cache; f; pure }
 
-    let v ?(pure = true) f =
-      let cache = Hashtbl.create 8 in
-      { cache; f; pure }
+  let f { f; _ } = f
+  let cache { cache; _ } = cache
+  let pure { pure; _ } = pure
 
-    let f { f; _ } = f
-    let cache { cache; _ } = cache
-    let pure { pure; _ } = pure
-  end
-
-  module Settings = struct
+  module Options = struct
     type t = {
       depth : Store.Tree.depth option;
       prefix : Store.Path.t option;
@@ -57,10 +38,10 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     | Some (step, path) -> combine_paths path (Store.Path.cons step k)
     | None -> k
 
-  let items ?(settings = Settings.default) store :
+  let items ?(options = Options.default) store :
       (Store.path * Store.contents) Results.t Lwt.t =
     let* prefix, tree =
-      match settings.prefix with
+      match options.prefix with
       | Some prefix ->
           let+ t = Store.get_tree store prefix in
           (prefix, t)
@@ -70,31 +51,30 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     in
     let exception Return of (Store.path * Store.contents) Results.t in
     let count = ref 0 in
-    let limit = match settings.limit with Some x -> x | None -> 0 in
+    let limit = match options.limit with Some x -> x | None -> 0 in
     let contents path c acc =
-      if Option.is_some settings.limit && !count >= limit then
-        raise (Return acc)
+      if Option.is_some options.limit && !count >= limit then raise (Return acc)
       else
         let () = incr count in
         Lwt.return (Results.cons (combine_paths prefix path, c) acc)
     in
     Lwt.catch
       (fun () ->
-        Store.Tree.fold ~order:settings.order ?depth:settings.depth tree
-          ~contents Results.empty)
+        Store.Tree.fold ~order:options.order ?depth:options.depth tree ~contents
+          Results.empty)
       (function Return acc -> Lwt.return acc | exn -> raise exn)
 
-  let paths ?settings store =
-    let+ x = items ?settings store in
+  let paths ?options store =
+    let+ x = items ?options store in
     Lwt_seq.map fst x
 
-  let iter' (type a) (f : a Iter.t) store
+  let iter' (type a) (t : a t) store
       (results : (Store.path * Store.contents) Results.t) =
-    let pure = Iter.pure f in
-    let cache = Iter.cache f in
-    let f = Iter.f f in
+    let pure = pure t in
+    let cache = cache t in
+    let f = f t in
     let* head = Store.Head.get store in
-    let cache : (Store.path, a) Hashtbl.t =
+    let cache : (Store.path, a option) Hashtbl.t =
       match Hashtbl.find_opt cache head with
       | Some x -> x
       | None ->
@@ -112,51 +92,16 @@ module Make (X : Irmin.S) : S with module Store = X = struct
             x
         | _ -> f k v
       in
-      Lwt.return_some x
+      Lwt.return x
     in
     Lwt.return @@ Results.filter_map_s inner results
 
-  let map (f : 'a Iter.t) ?settings store : 'a Results.t Lwt.t =
+  let exec (f : 'a t) ?options store : 'a Results.t Lwt.t =
     let* (items : (Store.path * Store.contents) Results.t) =
-      items ?settings store
+      items ?options store
     in
     iter' f store items
 
-  let filter_map :
-      filter:Filter.t ->
-      'a Iter.t ->
-      ?settings:Settings.t ->
-      Store.t ->
-      'a Results.t Lwt.t =
-   fun ~filter f ?settings store ->
-    let* head = Store.Head.get store in
-    let cache = Filter.cache filter in
-    let filter' = Filter.f filter in
-    let filter_cache : (Store.path, bool) Hashtbl.t =
-      match Hashtbl.find_opt cache head with
-      | Some x -> x
-      | None ->
-          let ht = Hashtbl.create 8 in
-          Hashtbl.replace cache head ht;
-          ht
-    in
-    let inner (k, v) : bool Lwt.t =
-      let* (ok : bool) =
-        if not (Filter.pure filter) then filter' k v
-        else
-          match Hashtbl.find_opt filter_cache k with
-          | Some ok -> Lwt.return ok
-          | None ->
-              let+ ok = filter' k v in
-              let () = Hashtbl.replace filter_cache k ok in
-              ok
-      in
-      Lwt.return ok
-    in
-    let* items = items ?settings store in
-    let x = Results.filter_s inner items in
-    iter' f store x
-
-  let reduce f results init =
+  let fold f results init =
     Results.fold_left_s (fun acc x -> f x acc) init results
 end

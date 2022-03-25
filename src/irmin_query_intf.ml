@@ -1,7 +1,7 @@
 module type S = sig
   module Store : Irmin.S
 
-  module Settings : sig
+  module Options : sig
     type t = {
       depth : Store.Tree.depth option;
       prefix : Store.Path.t option;
@@ -12,41 +12,23 @@ module type S = sig
     val default : t
   end
 
-  module Filter : sig
-    type f = Store.path -> Store.contents -> bool Lwt.t
-    type t
+  type 'a f = Store.path -> Store.contents -> 'a option Lwt.t
+  type 'a t
 
-    val v : ?pure:bool -> f -> t
-    val f : t -> f
-  end
-
-  module Iter : sig
-    type 'a f = Store.path -> Store.contents -> 'a Lwt.t
-    type 'a t
-
-    val v : ?pure:bool -> 'a f -> 'a t
-    val f : 'a t -> 'a f
-  end
+  val v : ?pure:bool -> 'a f -> 'a t
+  val f : 'a t -> 'a f
 
   module Results = Lwt_seq
 
-  val paths : ?settings:Settings.t -> Store.t -> Store.path Results.t Lwt.t
+  val paths : ?options:Options.t -> Store.t -> Store.path Results.t Lwt.t
 
   val items :
-    ?settings:Settings.t ->
+    ?options:Options.t ->
     Store.t ->
     (Store.path * Store.contents) Results.t Lwt.t
 
-  val map : 'a Iter.t -> ?settings:Settings.t -> Store.t -> 'a Results.t Lwt.t
-
-  val filter_map :
-    filter:Filter.t ->
-    'a Iter.t ->
-    ?settings:Settings.t ->
-    Store.t ->
-    'a Results.t Lwt.t
-
-  val reduce : ('a -> 'b -> 'b Lwt.t) -> 'a Results.t -> 'b -> 'b Lwt.t
+  val exec : 'a t -> ?options:Options.t -> Store.t -> 'a Results.t Lwt.t
+  val fold : ('a -> 'b -> 'b Lwt.t) -> 'a Results.t -> 'b -> 'b Lwt.t
 end
 
 module type Irmin_query = sig

@@ -19,6 +19,7 @@ depends:
   "dune" {>= "2.0.0"}
   "irmin" {>= "2.0.0"}
   "alcotest-lwt" {with-test}
+  "ppx_irmin" {with-test}
 ]
 
 synopsis: "Iterate over Irmin stores"
