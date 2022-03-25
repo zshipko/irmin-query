@@ -17,18 +17,15 @@ module type S = sig
 
   val v : ?pure:bool -> 'a f -> 'a t
   val f : 'a t -> 'a f
-
-  module Results = Lwt_seq
-
-  val paths : ?options:Options.t -> Store.t -> Store.path Results.t Lwt.t
+  val paths : ?options:Options.t -> Store.t -> Store.path Lwt_seq.t Lwt.t
 
   val items :
     ?options:Options.t ->
     Store.t ->
-    (Store.path * Store.contents) Results.t Lwt.t
+    (Store.path * Store.contents) Lwt_seq.t Lwt.t
 
-  val exec : 'a t -> ?options:Options.t -> Store.t -> 'a Results.t Lwt.t
-  val fold : ('a -> 'b -> 'b Lwt.t) -> 'a Results.t -> 'b -> 'b Lwt.t
+  val exec : 'a t -> ?options:Options.t -> Store.t -> 'a Lwt_seq.t Lwt.t
+  val fold : ('a -> 'b -> 'b Lwt.t) -> 'a Lwt_seq.t -> 'b -> 'b Lwt.t
 end
 
 module type Irmin_query = sig

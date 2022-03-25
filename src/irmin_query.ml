@@ -31,15 +31,13 @@ module Make (X : Irmin.S) : S with module Store = X = struct
       { depth = None; prefix = None; limit = None; order = `Undefined }
   end
 
-  module Results = Lwt_seq
-
   let rec combine_paths prefix k =
     match Store.Path.decons prefix with
     | Some (step, path) -> combine_paths path (Store.Path.cons step k)
     | None -> k
 
   let items ?(options = Options.default) store :
-      (Store.path * Store.contents) Results.t Lwt.t =
+      (Store.path * Store.contents) Lwt_seq.t Lwt.t =
     let* prefix, tree =
       match options.prefix with
       | Some prefix ->
@@ -49,19 +47,19 @@ module Make (X : Irmin.S) : S with module Store = X = struct
           let+ t = Store.tree store in
           (Store.Path.empty, t)
     in
-    let exception Return of (Store.path * Store.contents) Results.t in
+    let exception Return of (Store.path * Store.contents) Lwt_seq.t in
     let count = ref 0 in
     let limit = match options.limit with Some x -> x | None -> 0 in
     let contents path c acc =
       if Option.is_some options.limit && !count >= limit then raise (Return acc)
       else
         let () = incr count in
-        Lwt.return (Results.cons (combine_paths prefix path, c) acc)
+        Lwt.return (Lwt_seq.cons (combine_paths prefix path, c) acc)
     in
     Lwt.catch
       (fun () ->
         Store.Tree.fold ~order:options.order ?depth:options.depth tree ~contents
-          Results.empty)
+          Lwt_seq.empty)
       (function Return acc -> Lwt.return acc | exn -> raise exn)
 
   let paths ?options store =
@@ -69,11 +67,11 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     Lwt_seq.map fst x
 
   let iter' (type a) (t : a t) store
-      (results : (Store.path * Store.contents) Results.t) =
+      (results : (Store.path * Store.contents) Lwt_seq.t) =
     let pure = pure t in
     let cache = cache t in
     let f = f t in
-    let* head = Store.Head.get store in
+    let+ head = Store.Head.get store in
     let cache : (Store.path, a option) Hashtbl.t =
       match Hashtbl.find_opt cache head with
       | Some x -> x
@@ -94,14 +92,14 @@ module Make (X : Irmin.S) : S with module Store = X = struct
       in
       Lwt.return x
     in
-    Lwt.return @@ Results.filter_map_s inner results
+    Lwt_seq.filter_map_s inner results
 
-  let exec (f : 'a t) ?options store : 'a Results.t Lwt.t =
-    let* (items : (Store.path * Store.contents) Results.t) =
+  let exec (f : 'a t) ?options store : 'a Lwt_seq.t Lwt.t =
+    let* (items : (Store.path * Store.contents) Lwt_seq.t) =
       items ?options store
     in
     iter' f store items
 
   let fold f results init =
-    Results.fold_left_s (fun acc x -> f x acc) init results
+    Lwt_seq.fold_left_s (fun acc x -> f x acc) init results
 end
