@@ -18,6 +18,7 @@ module Make (X : Irmin.S) : S with module Store = X = struct
   let f { f; _ } = f
   let cache { cache; _ } = cache
   let pure { pure; _ } = pure
+  let reset { cache; _ } = Hashtbl.reset cache
 
   module Options = struct
     type t = {
@@ -66,12 +67,11 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     let+ x = items ?options store in
     Lwt_seq.map fst x
 
-  let iter' (type a) (t : a t) store
-      (results : (Store.path * Store.contents) Lwt_seq.t) =
+  let exec (type a) (t : a t) ?options store =
     let pure = pure t in
     let cache = cache t in
     let f = f t in
-    let+ head = Store.Head.get store in
+    let* head = Store.Head.get store in
     let cache : (Store.path, a option) Hashtbl.t =
       match Hashtbl.find_opt cache head with
       | Some x -> x
@@ -92,14 +92,8 @@ module Make (X : Irmin.S) : S with module Store = X = struct
       in
       Lwt.return x
     in
-    Lwt_seq.filter_map_s inner results
-
-  let exec (f : 'a t) ?options store : 'a Lwt_seq.t Lwt.t =
-    let* (items : (Store.path * Store.contents) Lwt_seq.t) =
+    let+ (items : (Store.path * Store.contents) Lwt_seq.t) =
       items ?options store
     in
-    iter' f store items
-
-  let fold f results init =
-    Lwt_seq.fold_left_s (fun acc x -> f x acc) init results
+    Lwt_seq.filter_map_s inner items
 end

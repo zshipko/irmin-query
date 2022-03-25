@@ -16,16 +16,15 @@ module type S = sig
   type 'a t
 
   val v : ?pure:bool -> 'a f -> 'a t
-  val f : 'a t -> 'a f
-  val paths : ?options:Options.t -> Store.t -> Store.path Lwt_seq.t Lwt.t
+  val reset : 'a t -> unit
 
   val items :
     ?options:Options.t ->
     Store.t ->
     (Store.path * Store.contents) Lwt_seq.t Lwt.t
 
+  val paths : ?options:Options.t -> Store.t -> Store.path Lwt_seq.t Lwt.t
   val exec : 'a t -> ?options:Options.t -> Store.t -> 'a Lwt_seq.t Lwt.t
-  val fold : ('a -> 'b -> 'b Lwt.t) -> 'a Lwt_seq.t -> 'b -> 'b Lwt.t
 end
 
 module type Irmin_query = sig
