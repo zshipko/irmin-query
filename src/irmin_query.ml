@@ -5,7 +5,18 @@ module Make (X : Irmin.S) : S with module Store = X = struct
   module Store = X
 
   module Cache = struct
-    type 'a t = (Store.hash, (Store.path, 'a option) Hashtbl.t) Hashtbl.t
+    module Lru = struct
+      include Irmin.Backend.Lru.Make (struct
+        type t = Store.hash
+
+        let hash x = Irmin.Type.(unstage @@ short_hash Store.hash_t) x
+        let equal a b = Irmin.Type.(unstage @@ equal Store.hash_t) a b
+      end)
+
+      let find_opt t h = if mem t h then Some (find t h) else None
+    end
+
+    type 'a t = (Store.path, 'a option) Hashtbl.t Lru.t
   end
 
   type 'a f = Store.path -> Store.contents -> 'a option Lwt.t
@@ -13,13 +24,13 @@ module Make (X : Irmin.S) : S with module Store = X = struct
 
   let v ?(cache = true) f =
     let enable_cache = cache in
-    let cache = Hashtbl.create 8 in
+    let cache = Cache.Lru.create 16 in
     { cache; f; enable_cache }
 
   let f { f; _ } = f
   let cache { cache; _ } = cache
   let enable_cache { enable_cache; _ } = enable_cache
-  let reset { cache; _ } = Hashtbl.reset cache
+  let reset { cache; _ } = Cache.Lru.clear cache
 
   module Options = struct
     type t = {
@@ -77,11 +88,11 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     let* head = Store.Head.get store in
     let hash = Store.Commit.hash head in
     let cache : (Store.path, a option) Hashtbl.t =
-      match Hashtbl.find_opt cache hash with
+      match Cache.Lru.find_opt cache hash with
       | Some x -> x
       | None ->
           let ht = Hashtbl.create 8 in
-          let () = if enable_cache then Hashtbl.replace cache hash ht in
+          let () = if enable_cache then Cache.Lru.add cache hash ht in
           ht
     in
     let inner (k, v) : a option Lwt.t =
