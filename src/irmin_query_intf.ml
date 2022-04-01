@@ -15,7 +15,7 @@ module type S = sig
   type 'a f = Store.path -> Store.contents -> 'a option Lwt.t
   type 'a t
 
-  val v : ?pure:bool -> 'a f -> 'a t
+  val v : ?cache:bool -> 'a f -> 'a t
   val reset : 'a t -> unit
 
   val items :

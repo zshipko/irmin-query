@@ -5,19 +5,20 @@ module Make (X : Irmin.S) : S with module Store = X = struct
   module Store = X
 
   module Cache = struct
-    type 'a t = (Store.commit, (Store.path, 'a option) Hashtbl.t) Hashtbl.t
+    type 'a t = (Store.hash, (Store.path, 'a option) Hashtbl.t) Hashtbl.t
   end
 
   type 'a f = Store.path -> Store.contents -> 'a option Lwt.t
-  type 'a t = { cache : 'a Cache.t; f : 'a f; pure : bool }
+  type 'a t = { cache : 'a Cache.t; f : 'a f; enable_cache : bool }
 
-  let v ?(pure = true) f =
+  let v ?(cache = true) f =
+    let enable_cache = cache in
     let cache = Hashtbl.create 8 in
-    { cache; f; pure }
+    { cache; f; enable_cache }
 
   let f { f; _ } = f
   let cache { cache; _ } = cache
-  let pure { pure; _ } = pure
+  let enable_cache { enable_cache; _ } = enable_cache
   let reset { cache; _ } = Hashtbl.reset cache
 
   module Options = struct
@@ -68,21 +69,22 @@ module Make (X : Irmin.S) : S with module Store = X = struct
     Lwt_seq.map fst x
 
   let exec (type a) (t : a t) ?options store =
-    let pure = pure t in
+    let enable_cache = enable_cache t in
     let cache = cache t in
     let f = f t in
     let* head = Store.Head.get store in
+    let hash = Store.Commit.hash head in
     let cache : (Store.path, a option) Hashtbl.t =
-      match Hashtbl.find_opt cache head with
+      match Hashtbl.find_opt cache hash with
       | Some x -> x
       | None ->
           let ht = Hashtbl.create 8 in
-          Hashtbl.replace cache head ht;
+          let () = if enable_cache then Hashtbl.replace cache hash ht in
           ht
     in
     let inner (k, v) : a option Lwt.t =
       let* x =
-        match (pure, Hashtbl.find_opt cache k) with
+        match (enable_cache, Hashtbl.find_opt cache k) with
         | true, Some x -> Lwt.return x
         | true, None ->
             let+ x = f k v in
