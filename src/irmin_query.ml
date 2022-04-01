@@ -29,8 +29,10 @@ module Make (X : Irmin.S) : S with module Store = X = struct
       order : [ `Random of Random.State.t | `Sorted | `Undefined ];
     }
 
-    let default =
-      { depth = None; prefix = None; limit = None; order = `Undefined }
+    let v ?depth ?prefix ?limit ?(order = `Undefined) () =
+      { depth; prefix; limit; order }
+
+    let default = v ()
   end
 
   let rec combine_paths prefix k =

@@ -9,6 +9,14 @@ module type S = sig
       order : [ `Random of Random.State.t | `Sorted | `Undefined ];
     }
 
+    val v :
+      ?depth:Store.Tree.depth ->
+      ?prefix:Store.Path.t ->
+      ?limit:int ->
+      ?order:[ `Random of Random.State.t | `Sorted | `Undefined ] ->
+      unit ->
+      t
+
     val default : t
   end
 
