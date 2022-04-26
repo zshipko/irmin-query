@@ -1,3 +1,3 @@
 # irmin-query
 
-Provides an interface to simplify querying [irmin](https://irmin.io) stores
+An OCaml package for iterating over [irmin](https://irmin.io) store contents
