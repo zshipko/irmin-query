@@ -1,7 +1,7 @@
 open Lwt.Syntax
 include Irmin_query_intf
 
-module Make (X : Irmin.S) = struct
+module Make (X : Irmin.Generic_key.S) = struct
   module Store = X
 
   module Cache = struct
@@ -110,4 +110,68 @@ module Make (X : Irmin.S) = struct
       contents ?depth ?prefix ?limit ?order store
     in
     Lwt_seq.filter_map_s inner items
+
+  module Expr = struct
+    type 'a t =
+      | Find : Store.path -> Store.contents option t
+      | Find_tree : Store.path -> Store.tree option t
+      | Remove : Store.path -> unit t
+      | Set : Store.path * Store.contents t -> unit t
+      | Set_tree : Store.path * Store.tree t -> unit t
+      | Value : 'a -> 'a t
+      | Map : ('b t * ('b -> 'a Lwt.t)) -> 'a t
+
+    let find path = Find path
+    let find_tree path = Find_tree path
+    let remove path = Remove path
+    let set path value = Set (path, value)
+    let set_tree path value = Set_tree (path, value)
+    let value x = Value x
+    let map f t = Map (t, f)
+    let ( let& ) t f = map f t
+
+    let get path =
+      let& a = find path in
+      Lwt.return @@ Option.get a
+
+    let get_tree path =
+      let& a = find_tree path in
+      Lwt.return @@ Option.get a
+
+    let tree_pair tree x =
+      let+ x in
+      (tree, x)
+
+    let rec exec' : type a. Store.tree -> a t -> (Store.tree * a) Lwt.t =
+     fun tree expr ->
+      match expr with
+      | Find path -> tree_pair tree @@ Store.Tree.find tree path
+      | Find_tree path -> tree_pair tree @@ Store.Tree.find_tree tree path
+      | Remove path ->
+          let+ tree = Store.Tree.remove tree path in
+          (tree, ())
+      | Set (path, value) ->
+          let* tree, value = exec' tree value in
+          let+ tree = Store.Tree.add tree path value in
+          (tree, ())
+      | Set_tree (path, t) ->
+          let* tree, t = exec' tree t in
+          let+ tree = Store.Tree.add_tree tree path t in
+          (tree, ())
+      | Value x -> Lwt.return (tree, x)
+      | Map (x, f) ->
+          let* tree, x = exec' tree x in
+          tree_pair tree (f x)
+
+    let exec ?parents ?(path = Store.Path.empty) ~info store expr =
+      let ret = ref None in
+      let+ () =
+        Store.with_tree_exn ~info ?parents store path (fun tree ->
+            let tree = Option.value ~default:(Store.Tree.empty ()) tree in
+            let+ tree, x = exec' tree expr in
+            ret := Some x;
+            Some tree)
+      in
+      Option.get !ret
+  end
 end
