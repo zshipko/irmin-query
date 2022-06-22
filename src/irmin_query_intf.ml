@@ -25,10 +25,7 @@ module type S = sig
 
   module Expr : sig
     type 'a t
-    type group
 
-    val empty : group
-    val add : group -> 'a t -> group
     val path : Store.path -> Store.path t
     val find : Store.path t -> Store.contents option t
     val get : Store.path t -> Store.contents t
@@ -41,9 +38,10 @@ module type S = sig
     val bind : ('a -> 'b t Lwt.t) -> 'a t -> 'b t
     val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t
     val list : Store.tree t -> (Store.step * Store.tree) list t
-    val group : group -> unit t
+    val join : 'a t -> 'b t -> 'b t
     val ( let& ) : 'a t -> ('a -> 'b t Lwt.t) -> 'b t
     val ( let| ) : 'a t -> ('a -> 'b Lwt.t) -> 'b t
+    val ( & ) : 'a t -> 'b t -> 'b t
     val eval_tree : 'a t -> Store.tree -> (Store.tree * 'a) Lwt.t
 
     val eval :

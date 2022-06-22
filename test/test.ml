@@ -72,15 +72,18 @@ let expr user =
   let& tree = find_tree (path [ "test" ]) in
   let tree = Option.value ~default:(Store.Tree.empty ()) tree in
   let+ tree = Store.Tree.add tree [ "a" ] user in
-  set_tree (path [ "test" ]) (value tree)
+  set_tree (path [ "test" ]) (value tree) & value tree
 
 let test_expr store _ () =
   let open Query.Expr in
   let u = User.random () in
   let a = expr u in
   let info () = Store.Info.empty in
-  let* () = eval ~info store a in
-  let+ a = Store.get store [ "test"; "a" ] in
+  let* tree = eval ~info store a in
+  let* a = Store.get store [ "test"; "a" ] in
+  Alcotest.(check string "user name" u.User.name a.User.name);
+  Alcotest.(check int "user age" u.User.age a.User.age);
+  let+ a = Store.Tree.get tree [ "a" ] in
   Alcotest.(check string "user name" u.User.name a.User.name);
   Alcotest.(check int "user age" u.User.age a.User.age)
 

@@ -125,10 +125,7 @@ module Make (X : Irmin.Generic_key.S) = struct
       | Set_tree : Store.path t * Store.tree t -> unit t
       | Value : 'a -> 'a t
       | Bind : ('b t * ('b -> 'a t Lwt.t)) -> 'a t
-      | Group : x list -> unit t
-
-    and x = X : 'a t -> x
-    and group = x list
+      | Join : 'a t * 'b t -> 'b t
 
     let find path = Find path
     let find_tree path = Find_tree path
@@ -137,9 +134,7 @@ module Make (X : Irmin.Generic_key.S) = struct
     let set_tree path value = Set_tree (path, value)
     let value x = Value x
     let bind f t = Bind (t, f)
-    let empty = []
-    let add g a = X a :: g
-    let group g = Group g
+    let join a b = Join (a, b)
 
     let map f t =
       Bind
@@ -151,6 +146,7 @@ module Make (X : Irmin.Generic_key.S) = struct
     let path p = value p
     let ( let& ) t f = bind f t
     let ( let| ) t f = map f t
+    let ( & ) a b = join a b
 
     let get path =
       let| a = find path in
@@ -196,15 +192,9 @@ module Make (X : Irmin.Generic_key.S) = struct
           let* tree, x = eval' tree x in
           let* x = f x in
           eval' tree x
-      | Group l ->
-          let+ tree =
-            Lwt_list.fold_left_s
-              (fun tree (X x) ->
-                let+ tree, _x = eval' tree x in
-                tree)
-              tree l
-          in
-          (tree, ())
+      | Join (a, b) ->
+          let* tree, _ = eval' tree a in
+          eval' tree b
 
     let eval_tree expr tree = eval' tree expr
 
