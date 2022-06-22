@@ -1,4 +1,5 @@
 (library
  (name irmin_query)
  (public_name irmin-query)
- (libraries irmin))
+ (libraries irmin ezllvm)
+ (preprocess (pps ppx_irmin)))
