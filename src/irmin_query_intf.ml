@@ -11,17 +11,35 @@ module type S = sig
   val contents :
     (Store.t -> (Store.path * Store.contents) Lwt_seq.t Lwt.t) with_options
 
-  val tree : (Store.t -> (Store.path * Store.tree) Lwt_seq.t Lwt.t) with_options
-  val list : (Store.t -> Store.path Lwt_seq.t Lwt.t) with_options
+  val trees :
+    (Store.t -> (Store.path * Store.tree) Lwt_seq.t Lwt.t) with_options
 
-  module Search : sig
-    type 'a f = Store.path -> Store.contents -> 'a option Lwt.t
+  val nodes :
+    (Store.t -> (Store.path * Store.node) Lwt_seq.t Lwt.t) with_options
+
+  val keys : (Store.t -> Store.path Lwt_seq.t Lwt.t) with_options
+
+  module Cache : sig
     type 'a t
 
-    val v : ?cache:bool -> 'a f -> 'a t
-    val reset : 'a t -> unit
-    val exec : ('a t -> Store.t -> 'a Lwt_seq.t Lwt.t) with_options
+    val create : int -> 'a t
   end
+
+  val select :
+    (?cache:'a option Cache.t ->
+    (Store.path -> Store.contents -> 'a option Lwt.t) ->
+    Store.t ->
+    'a Lwt_seq.t Lwt.t)
+    with_options
+
+  val update :
+    (?parents:Store.Commit.t list ->
+    ?strategy:[ `Set | `Merge | `Test_and_set ] ->
+    info:Store.Info.f ->
+    (Store.path -> Store.contents -> Store.contents option Lwt.t) ->
+    Store.t ->
+    unit Lwt.t)
+    with_options
 
   module Expr : sig
     type 'a t

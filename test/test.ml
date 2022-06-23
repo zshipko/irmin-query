@@ -42,28 +42,38 @@ let get_users store prefix =
     items
 
 let test_key_count store _ () =
-  let* keys = Query.list store in
+  let* keys = Query.keys store in
   let+ count = count keys in
   Alcotest.(check int "Key count" 40 count)
 
 let test_prefix store _ () =
-  let q = Query.Search.v (fun _k v -> Lwt.return_some v) in
-  let* results = Query.Search.exec ~prefix:[ "user" ] q store in
+  let f _k v = Lwt.return_some v in
+  let* results = Query.select ~prefix:[ "user" ] f store in
   let+ count = count results in
   Alcotest.(check int "Prefix count" 20 count)
 
 let test_query store _ () =
-  let q =
-    Query.Search.v (fun _k v ->
-        if v.User.age > 100 then Lwt.return_some v else Lwt.return_none)
+  let f _k v =
+    if v.User.age > 100 then Lwt.return_some v else Lwt.return_none
   in
-  let* results = Query.Search.exec ~prefix:[ "user" ] q store in
+  let* results = Query.select ~prefix:[ "user" ] f store in
   let+ count = count results in
   Alcotest.(check int "Query count" 0 count)
 
+let test_update store _ () =
+  let f _k v =
+    if v.User.age < 100 then Lwt.return_some { v with age = 100 }
+    else Lwt.return_none
+  in
+  let info = Store.Info.none in
+  let* () = Query.update ~prefix:[ "user" ] ~info f store in
+  let* results = Query.select ~prefix:[ "user" ] f store in
+  let+ count = count results in
+  Alcotest.(check int "Query count" 20 count)
+
 let test_limit store _ () =
-  let q = Query.Search.v (fun k _v -> Lwt.return_some k) in
-  let* results = Query.Search.exec ~limit:2 ~prefix:[ "user" ] q store in
+  let f k _v = Lwt.return_some k in
+  let* results = Query.select ~limit:2 ~prefix:[ "user" ] f store in
   let+ count = count results in
   Alcotest.(check int "Limit count" 2 count)
 
@@ -98,6 +108,7 @@ let main =
           Alcotest_lwt.test_case "key count" `Quick (test_key_count store);
           Alcotest_lwt.test_case "prefix" `Quick (test_prefix store);
           Alcotest_lwt.test_case "query" `Quick (test_query store);
+          Alcotest_lwt.test_case "update" `Quick (test_update store);
           Alcotest_lwt.test_case "limit" `Quick (test_limit store);
           Alcotest_lwt.test_case "expr" `Quick (test_expr store);
         ] );
