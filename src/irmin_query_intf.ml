@@ -57,6 +57,7 @@ module type S = sig
     val map : ('a -> 'b Lwt.t) -> 'a t -> 'b t
     val list : Store.tree t -> (Store.step * Store.tree) list t
     val join : 'a t -> 'b t -> 'b t
+    val rename : from:Store.path t -> Store.Path.t t -> unit t
     val ( let& ) : 'a t -> ('a -> 'b t Lwt.t) -> 'b t
     val ( let| ) : 'a t -> ('a -> 'b Lwt.t) -> 'b t
     val ( & ) : 'a t -> 'b t -> 'b t
@@ -64,13 +65,11 @@ module type S = sig
 
     val eval :
       ?parents:Store.commit list ->
-      ?path:Store.path ->
+      ?prefix:Store.path ->
       info:Store.Info.f ->
       Store.t ->
       'a t ->
       'a Lwt.t
-
-    val eval_readonly : ?path:Store.path -> Store.t -> 'a t -> 'a Lwt.t
   end
 end
 

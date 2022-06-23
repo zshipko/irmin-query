@@ -194,6 +194,7 @@ module Make (X : Irmin.Generic_key.S) = struct
       Lwt.return @@ Option.get a
 
     let list t = map (fun tree -> Store.Tree.list tree Store.Path.empty) t
+    let rename ~from to_ = set_tree to_ (get_tree from)
 
     let tree_pair tree x =
       let open Lwt.Syntax in
@@ -235,23 +236,16 @@ module Make (X : Irmin.Generic_key.S) = struct
 
     let eval_tree expr tree = eval' tree expr
 
-    let eval ?parents ?(path = Store.Path.empty) ~info store expr =
+    let eval ?parents ?(prefix = Store.Path.empty) ~info store expr =
       let open Lwt.Syntax in
       let ret = ref None in
       let+ () =
-        Store.with_tree_exn ~info ?parents store path (fun tree ->
+        Store.with_tree_exn ~info ?parents store prefix (fun tree ->
             let tree = Option.value ~default:(Store.Tree.empty ()) tree in
             let+ tree, x = eval' tree expr in
             ret := Some x;
             Some tree)
       in
       Option.get !ret
-
-    let eval_readonly ?(path = Store.Path.empty) store expr =
-      let open Lwt.Syntax in
-      let* tree = Store.find_tree store path in
-      let tree = Option.value ~default:(Store.Tree.empty ()) tree in
-      let+ _, x = eval' tree expr in
-      x
   end
 end
