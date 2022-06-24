@@ -23,6 +23,7 @@ module type S = sig
     type 'a t
 
     val create : int -> 'a t
+    val clear : 'a t -> unit
   end
 
   val select :

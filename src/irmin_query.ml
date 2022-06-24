@@ -16,9 +16,8 @@ module Make (X : Irmin.Generic_key.S) = struct
     | Some (step, path) -> combine_paths path (Store.Path.cons step k)
     | None -> k
 
-  let contents ?depth ?prefix ?limit ?order store :
-      (Store.path * Store.contents) Lwt_seq.t Lwt.t =
-    let* prefix, tree =
+  let init store prefix limit =
+    let+ prefix, tree =
       match prefix with
       | Some prefix ->
           let+ t = Store.get_tree store prefix in
@@ -27,9 +26,14 @@ module Make (X : Irmin.Generic_key.S) = struct
           let+ t = Store.tree store in
           (Store.Path.empty, t)
     in
-    let exception Return of (Store.path * Store.contents) Lwt_seq.t in
     let count = ref 0 in
     let limit_n = match limit with Some x -> x | None -> 0 in
+    (prefix, tree, limit_n, count)
+
+  let contents ?depth ?prefix ?limit ?order store :
+      (Store.path * Store.contents) Lwt_seq.t Lwt.t =
+    let exception Return of (Store.path * Store.contents) Lwt_seq.t in
+    let* prefix, tree, limit_n, count = init store prefix limit in
     let contents path c acc =
       if Option.is_some limit && !count >= limit_n then raise (Return acc)
       else
@@ -42,18 +46,8 @@ module Make (X : Irmin.Generic_key.S) = struct
 
   let trees ?depth ?prefix ?limit ?order store :
       (Store.path * Store.tree) Lwt_seq.t Lwt.t =
-    let* prefix, tree' =
-      match prefix with
-      | Some prefix ->
-          let+ t = Store.get_tree store prefix in
-          (prefix, t)
-      | None ->
-          let+ t = Store.tree store in
-          (Store.Path.empty, t)
-    in
+    let* prefix, tree', limit_n, count = init store prefix limit in
     let exception Return of (Store.path * Store.tree) Lwt_seq.t in
-    let count = ref 0 in
-    let limit_n = match limit with Some x -> x | None -> 0 in
     let tree path tr acc =
       if Option.is_some limit && !count >= limit_n then raise (Return acc)
       else
@@ -69,18 +63,8 @@ module Make (X : Irmin.Generic_key.S) = struct
 
   let nodes ?depth ?prefix ?limit ?order store :
       (Store.path * Store.node) Lwt_seq.t Lwt.t =
-    let* prefix, tree' =
-      match prefix with
-      | Some prefix ->
-          let+ t = Store.get_tree store prefix in
-          (prefix, t)
-      | None ->
-          let+ t = Store.tree store in
-          (Store.Path.empty, t)
-    in
+    let* prefix, tree', limit_n, count = init store prefix limit in
     let exception Return of (Store.path * Store.node) Lwt_seq.t in
-    let count = ref 0 in
-    let limit_n = match limit with Some x -> x | None -> 0 in
     let node path (node : Store.node) acc =
       if Option.is_some limit && !count >= limit_n then raise (Return acc)
       else
