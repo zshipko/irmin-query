@@ -1,23 +1,18 @@
 module type S = sig
   module Store : Irmin.Generic_key.S
 
-  type 'a with_options =
-    ?depth:Store.Tree.depth ->
-    ?prefix:Store.Path.t ->
-    ?limit:int ->
-    ?order:[ `Random of Random.State.t | `Sorted | `Undefined ] ->
-    'a
-
   val contents :
-    (Store.t -> (Store.path * Store.contents) Lwt_seq.t Lwt.t) with_options
+    ?max_depth:int ->
+    Store.tree ->
+    (Store.path * Store.contents) Lwt_seq.t Lwt.t
 
   val trees :
-    (Store.t -> (Store.path * Store.tree) Lwt_seq.t Lwt.t) with_options
+    ?max_depth:int -> Store.tree -> (Store.path * Store.tree) Lwt_seq.t Lwt.t
 
   val nodes :
-    (Store.t -> (Store.path * Store.node) Lwt_seq.t Lwt.t) with_options
+    ?max_depth:int -> Store.tree -> (Store.path * Store.node) Lwt_seq.t Lwt.t
 
-  val keys : (Store.t -> Store.path Lwt_seq.t Lwt.t) with_options
+  val paths : ?max_depth:int -> Store.tree -> Store.path Lwt_seq.t Lwt.t
 
   module Cache : sig
     type 'a t
@@ -27,20 +22,23 @@ module type S = sig
   end
 
   val select :
-    (?cache:'a option Cache.t ->
+    ?limit:int ->
+    ?max_depth:int ->
+    ?prefix:Store.Path.t ->
+    ?cache:'a option Cache.t ->
     (Store.path -> Store.contents -> 'a option Lwt.t) ->
     Store.t ->
-    'a Lwt_seq.t Lwt.t)
-    with_options
+    'a Lwt_seq.t Lwt.t
 
   val update :
-    (?parents:Store.Commit.t list ->
+    ?max_depth:int ->
+    ?prefix:Store.Path.t ->
+    ?parents:Store.Commit.t list ->
     ?strategy:[ `Set | `Merge | `Test_and_set ] ->
     info:Store.Info.f ->
     (Store.path -> Store.contents -> Store.contents option Lwt.t) ->
     Store.t ->
-    unit Lwt.t)
-    with_options
+    unit Lwt.t
 
   module Expr : sig
     type 'a t

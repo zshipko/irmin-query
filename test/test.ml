@@ -42,8 +42,9 @@ let get_users store prefix =
     items
 
 let test_key_count store _ () =
-  let* keys = Query.keys store in
-  let+ count = count keys in
+  let* tree = Store.get_tree store [] in
+  let* paths = Query.paths tree in
+  let+ count = count paths in
   Alcotest.(check int "Key count" 40 count)
 
 let test_prefix store _ () =
@@ -65,11 +66,14 @@ let test_update store _ () =
     if v.User.age < 100 then Lwt.return_some { v with age = 100 }
     else Lwt.return_none
   in
+  let g _k v =
+    if v.User.age >= 100 then Lwt.return_some v else Lwt.return_none
+  in
   let info = Store.Info.none in
   let* () = Query.update ~prefix:[ "user" ] ~info f store in
-  let* results = Query.select ~prefix:[ "user" ] f store in
+  let* results = Query.select ~prefix:[ "user" ] g store in
   let+ count = count results in
-  Alcotest.(check int "Query count" 20 count)
+  Alcotest.(check int "Update count" 20 count)
 
 let test_limit store _ () =
   let f k _v = Lwt.return_some k in

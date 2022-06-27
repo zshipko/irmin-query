@@ -4,19 +4,12 @@ include Irmin_query_intf
 module Make (X : Irmin.Generic_key.S) = struct
   module Store = X
 
-  type 'a with_options =
-    ?depth:Store.Tree.depth ->
-    ?prefix:Store.Path.t ->
-    ?limit:int ->
-    ?order:[ `Random of Random.State.t | `Sorted | `Undefined ] ->
-    'a
-
-  let rec combine_paths prefix k =
+  let rec _combine_paths prefix k =
     match Store.Path.decons prefix with
-    | Some (step, path) -> combine_paths path (Store.Path.cons step k)
+    | Some (step, path) -> _combine_paths path (Store.Path.cons step k)
     | None -> k
 
-  let init store prefix limit =
+  let init store prefix =
     let+ prefix, tree =
       match prefix with
       | Some prefix ->
@@ -26,58 +19,65 @@ module Make (X : Irmin.Generic_key.S) = struct
           let+ t = Store.tree store in
           (Store.Path.empty, t)
     in
-    let count = ref 0 in
-    let limit_n = match limit with Some x -> x | None -> 0 in
-    (prefix, tree, limit_n, count)
+    (prefix, tree)
 
-  let contents ?depth ?prefix ?limit ?order store :
-      (Store.path * Store.contents) Lwt_seq.t Lwt.t =
-    let exception Return of (Store.path * Store.contents) Lwt_seq.t in
-    let* prefix, tree, limit_n, count = init store prefix limit in
-    let contents path c acc =
-      if Option.is_some limit && !count >= limit_n then raise (Return acc)
-      else
-        let () = incr count in
-        Lwt.return (Lwt_seq.cons (combine_paths prefix path, c) acc)
-    in
-    Lwt.catch
-      (fun () -> Store.Tree.fold ?order ?depth tree ~contents Lwt_seq.empty)
-      (function Return acc -> Lwt.return acc | exn -> raise exn)
+  let rec seq t ?(max_depth = -1) path :
+      (Store.Path.t
+      * [ `Contents of Store.Tree.Contents.t * Store.metadata
+        | `Node of Store.node ])
+      Lwt_seq.t
+      Lwt.t =
+    let+ s = Store.Tree.seq t ~cache:true path in
+    let s = Lwt_seq.of_seq s in
+    Lwt_seq.filter_map_s
+      (fun (step, t) ->
+        let path' = Store.Path.rcons path step in
+        match Store.Tree.destruct t with
+        | `Contents contents ->
+            Lwt.return_some @@ Lwt_seq.return (path', `Contents contents)
+        | `Node node ->
+            if max_depth = 0 then Lwt.return_none
+            else
+              let* x = seq ~max_depth:(max_depth - 1) t Store.Path.empty in
+              let x = Lwt_seq.append (Lwt_seq.return (path', `Node node)) x in
+              Lwt.return_some x)
+      s
+    |> Lwt_seq.flat_map Fun.id
 
-  let trees ?depth ?prefix ?limit ?order store :
-      (Store.path * Store.tree) Lwt_seq.t Lwt.t =
-    let* prefix, tree', limit_n, count = init store prefix limit in
-    let exception Return of (Store.path * Store.tree) Lwt_seq.t in
-    let tree path tr acc =
-      if Option.is_some limit && !count >= limit_n then raise (Return acc)
-      else
-        let () = incr count in
-        match Store.Tree.inspect tr with
-        | `Contents -> Lwt.return acc
-        | `Node _ ->
-            Lwt.return (Lwt_seq.cons (combine_paths prefix path, tr) acc)
-    in
-    Lwt.catch
-      (fun () -> Store.Tree.fold ?order ?depth tree' ~tree Lwt_seq.empty)
-      (function Return acc -> Lwt.return acc | exn -> raise exn)
+  let contents ?max_depth tree : (Store.path * Store.contents) Lwt_seq.t Lwt.t =
+    let+ seq = seq ?max_depth tree Store.Path.empty in
+    Lwt_seq.filter_map_s
+      (fun (k, v) ->
+        match v with
+        | `Contents (c, _) ->
+            let+ c = Store.Tree.Contents.force_exn c in
+            Some (k, c)
+        | _ -> Lwt.return_none)
+      seq
 
-  let nodes ?depth ?prefix ?limit ?order store :
-      (Store.path * Store.node) Lwt_seq.t Lwt.t =
-    let* prefix, tree', limit_n, count = init store prefix limit in
-    let exception Return of (Store.path * Store.node) Lwt_seq.t in
-    let node path (node : Store.node) acc =
-      if Option.is_some limit && !count >= limit_n then raise (Return acc)
-      else
-        let () = incr count in
-        Lwt.return (Lwt_seq.cons (combine_paths prefix path, node) acc)
-    in
-    Lwt.catch
-      (fun () -> Store.Tree.fold ?order ?depth tree' ~node Lwt_seq.empty)
-      (function Return acc -> Lwt.return acc | exn -> raise exn)
+  let trees ?max_depth tree : (Store.path * Store.tree) Lwt_seq.t Lwt.t =
+    let+ seq = seq ?max_depth tree Store.Path.empty in
+    Lwt_seq.map_s
+      (fun (k, v) ->
+        match v with
+        | `Contents (c, metadata) ->
+            let+ c = Store.Tree.Contents.force_exn c in
+            (k, Store.Tree.of_contents ~metadata c)
+        | `Node node -> Lwt.return (k, Store.Tree.of_node node))
+      seq
 
-  let keys ?depth ?prefix ?limit ?order store =
-    let+ x = contents ?depth ?prefix ?limit ?order store in
-    Lwt_seq.map fst x
+  let nodes ?max_depth tree : (Store.path * Store.node) Lwt_seq.t Lwt.t =
+    let+ seq = seq ?max_depth tree Store.Path.empty in
+    Lwt_seq.filter_map
+      (fun (k, v) ->
+        match v with `Contents _ -> None | `Node node -> Some (k, node))
+      seq
+
+  let paths ?max_depth tree : Store.path Lwt_seq.t Lwt.t =
+    let+ seq = seq ?max_depth tree Store.Path.empty in
+    Lwt_seq.filter_map
+      (fun (k, v) -> match v with `Contents _ -> Some k | _ -> None)
+      seq
 
   module Cache = struct
     include Irmin.Backend.Lru.Make (struct
@@ -93,28 +93,45 @@ module Make (X : Irmin.Generic_key.S) = struct
     let find_opt t h = if mem t h then Some (find t h) else None
   end
 
-  let select ?depth ?prefix ?limit ?order ?cache f store =
+  let select ?limit ?max_depth ?prefix ?cache f store =
+    let count = ref 0 in
+    let incr_count x =
+      if Option.is_some x then
+        let () = incr count in
+        Lwt.return x
+      else Lwt.return x
+    in
+    let has_limit = Option.is_some limit in
+    let limit_n = Option.value ~default:0 limit in
     let inner =
       match cache with
       | Some cache -> (
           fun (k, v) ->
-            let hash = Store.Contents.hash v in
-            match Cache.find_opt cache (k, hash) with
-            | Some x -> Lwt.return x
-            | None ->
-                let+ x = f k v in
-                Cache.add cache (k, hash) x;
-                x)
-      | None -> fun (k, v) -> f k v
+            if has_limit && !count >= limit_n then Lwt.return_none
+            else
+              let hash = Store.Contents.hash v in
+              match Cache.find_opt cache (k, hash) with
+              | Some x -> incr_count x
+              | None ->
+                  let* x = f k v in
+                  Cache.add cache (k, hash) x;
+                  incr_count x)
+      | None ->
+          fun (k, v) ->
+            if has_limit && !count >= limit_n then Lwt.return_none
+            else
+              let* x = f k v in
+              incr_count x
     in
+    let* _, tree = init store prefix in
     let+ (items : (Store.path * Store.contents) Lwt_seq.t) =
-      contents ?depth ?prefix ?limit ?order store
+      contents ?max_depth tree
     in
     Lwt_seq.filter_map_s inner items
 
-  let update ?depth ?prefix ?limit ?order ?parents ?strategy ~info f store =
-    let path = Option.value ~default:Store.Path.empty prefix in
-    let* items = contents ?depth ?prefix ?limit ?order store in
+  let update ?max_depth ?prefix ?parents ?strategy ~info f store =
+    let* prefix, tree = init store prefix in
+    let* items = contents ?max_depth tree in
     let items =
       Lwt_seq.map_s
         (fun (k, v) ->
@@ -122,7 +139,7 @@ module Make (X : Irmin.Generic_key.S) = struct
           (k, v))
         items
     in
-    Store.with_tree_exn store path
+    Store.with_tree_exn store prefix
       (fun tree ->
         let tree = Option.value ~default:(Store.Tree.empty ()) tree in
         let* tree =
