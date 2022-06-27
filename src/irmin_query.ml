@@ -10,16 +10,8 @@ module Make (X : Irmin.Generic_key.S) = struct
     | None -> k
 
   let init store prefix =
-    let+ prefix, tree =
-      match prefix with
-      | Some prefix ->
-          let+ t = Store.get_tree store prefix in
-          (prefix, t)
-      | None ->
-          let+ t = Store.tree store in
-          (Store.Path.empty, t)
-    in
-    (prefix, tree)
+    let+ t = Store.get_tree store prefix in
+    (prefix, t)
 
   let rec seq t ?(max_depth = -1) path :
       (Store.Path.t

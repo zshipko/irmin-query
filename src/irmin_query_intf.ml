@@ -32,7 +32,6 @@ module type S = sig
 
   val update :
     ?max_depth:int ->
-    ?prefix:Store.Path.t ->
     ?parents:Store.Commit.t list ->
     ?strategy:[ `Set | `Merge | `Test_and_set ] ->
     info:Store.Info.f ->
