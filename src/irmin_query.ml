@@ -93,7 +93,7 @@ module Make (X : Irmin.Generic_key.S) = struct
     let find_opt t h = if mem t h then Some (find t h) else None
   end
 
-  let select ?limit ?max_depth ?prefix ?cache f store =
+  let select ?limit ?max_depth ?cache f store prefix =
     let count = ref 0 in
     let incr_count x =
       if Option.is_some x then
@@ -129,7 +129,7 @@ module Make (X : Irmin.Generic_key.S) = struct
     in
     Lwt_seq.filter_map_s inner items
 
-  let update ?max_depth ?prefix ?parents ?strategy ~info f store =
+  let update ?max_depth ?parents ?strategy ~info f store prefix =
     let* prefix, tree = init store prefix in
     let* items = contents ?max_depth tree in
     let items =

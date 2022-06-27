@@ -49,7 +49,7 @@ let test_key_count store _ () =
 
 let test_prefix store _ () =
   let f _k v = Lwt.return_some v in
-  let* results = Query.select ~prefix:[ "user" ] f store in
+  let* results = Query.select f store [ "user" ] in
   let+ count = count results in
   Alcotest.(check int "Prefix count" 20 count)
 
@@ -57,7 +57,7 @@ let test_query store _ () =
   let f _k v =
     if v.User.age > 100 then Lwt.return_some v else Lwt.return_none
   in
-  let* results = Query.select ~prefix:[ "user" ] f store in
+  let* results = Query.select f store [ "user" ] in
   let+ count = count results in
   Alcotest.(check int "Query count" 0 count)
 
@@ -70,14 +70,14 @@ let test_update store _ () =
     if v.User.age >= 100 then Lwt.return_some v else Lwt.return_none
   in
   let info = Store.Info.none in
-  let* () = Query.update ~prefix:[ "user" ] ~info f store in
-  let* results = Query.select ~prefix:[ "user" ] g store in
+  let* () = Query.update ~info f store [ "user" ] in
+  let* results = Query.select g store [ "user" ] in
   let+ count = count results in
   Alcotest.(check int "Update count" 20 count)
 
 let test_limit store _ () =
   let f k _v = Lwt.return_some k in
-  let* results = Query.select ~limit:2 ~prefix:[ "user" ] f store in
+  let* results = Query.select ~limit:2 f store [ "user" ] in
   let+ count = count results in
   Alcotest.(check int "Limit count" 2 count)
 

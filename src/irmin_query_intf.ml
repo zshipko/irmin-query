@@ -24,10 +24,10 @@ module type S = sig
   val select :
     ?limit:int ->
     ?max_depth:int ->
-    ?prefix:Store.Path.t ->
     ?cache:'a option Cache.t ->
     (Store.path -> Store.contents -> 'a option Lwt.t) ->
     Store.t ->
+    Store.Path.t ->
     'a Lwt_seq.t Lwt.t
 
   val update :
@@ -38,6 +38,7 @@ module type S = sig
     info:Store.Info.f ->
     (Store.path -> Store.contents -> Store.contents option Lwt.t) ->
     Store.t ->
+    Store.Path.t ->
     unit Lwt.t
 
   module Expr : sig
