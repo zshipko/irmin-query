@@ -13,25 +13,24 @@ module Make (X : Irmin.Generic_key.S) = struct
     let+ t = Store.get_tree store prefix in
     (prefix, t)
 
-  let rec seq t ?(max_depth = -1) path :
-      (Store.Path.t
-      * [ `Contents of Store.Tree.Contents.t * Store.metadata
-        | `Node of Store.node ])
-      Lwt_seq.t
-      Lwt.t =
+  type kind =
+    | Contents : Store.Tree.Contents.t * Store.metadata -> kind
+    | Node : Store.node -> kind
+
+  let rec seq t ?(max_depth = -1) path : (Store.Path.t * kind) Lwt_seq.t Lwt.t =
     let+ s = Store.Tree.seq t ~cache:true path in
     let s = Lwt_seq.of_seq s in
     Lwt_seq.filter_map_s
       (fun (step, t) ->
         let path' = Store.Path.rcons path step in
         match Store.Tree.destruct t with
-        | `Contents contents ->
-            Lwt.return_some @@ Lwt_seq.return (path', `Contents contents)
+        | `Contents (a, b) ->
+            Lwt.return_some @@ Lwt_seq.return (path', Contents (a, b))
         | `Node node ->
             if max_depth = 0 then Lwt.return_none
             else
               let* x = seq ~max_depth:(max_depth - 1) t Store.Path.empty in
-              let x = Lwt_seq.append (Lwt_seq.return (path', `Node node)) x in
+              let x = Lwt_seq.append (Lwt_seq.return (path', Node node)) x in
               Lwt.return_some x)
       s
     |> Lwt_seq.flat_map Fun.id
@@ -41,7 +40,7 @@ module Make (X : Irmin.Generic_key.S) = struct
     Lwt_seq.filter_map_s
       (fun (k, v) ->
         match v with
-        | `Contents (c, _) ->
+        | Contents (c, _) ->
             let+ c = Store.Tree.Contents.force_exn c in
             Some (k, c)
         | _ -> Lwt.return_none)
@@ -52,23 +51,23 @@ module Make (X : Irmin.Generic_key.S) = struct
     Lwt_seq.map_s
       (fun (k, v) ->
         match v with
-        | `Contents (c, metadata) ->
+        | Contents (c, metadata) ->
             let+ c = Store.Tree.Contents.force_exn c in
             (k, Store.Tree.of_contents ~metadata c)
-        | `Node node -> Lwt.return (k, Store.Tree.of_node node))
+        | Node node -> Lwt.return (k, Store.Tree.of_node node))
       seq
 
   let nodes ?max_depth tree : (Store.path * Store.node) Lwt_seq.t Lwt.t =
     let+ seq = seq ?max_depth tree Store.Path.empty in
     Lwt_seq.filter_map
       (fun (k, v) ->
-        match v with `Contents _ -> None | `Node node -> Some (k, node))
+        match v with Contents _ -> None | Node node -> Some (k, node))
       seq
 
   let paths ?max_depth tree : Store.path Lwt_seq.t Lwt.t =
     let+ seq = seq ?max_depth tree Store.Path.empty in
     Lwt_seq.filter_map
-      (fun (k, v) -> match v with `Contents _ -> Some k | _ -> None)
+      (fun (k, v) -> match v with Contents _ -> Some k | _ -> None)
       seq
 
   module Cache = struct
@@ -125,10 +124,10 @@ module Make (X : Irmin.Generic_key.S) = struct
     let* prefix, tree = init store prefix in
     let* items = contents ?max_depth tree in
     let items =
-      Lwt_seq.map_s
+      Lwt_seq.filter_map_s
         (fun (k, v) ->
           let+ v = f k v in
-          (k, v))
+          match v with None -> None | Some v -> Some (k, v))
         items
     in
     Store.with_tree_exn store prefix
@@ -138,8 +137,8 @@ module Make (X : Irmin.Generic_key.S) = struct
           Lwt_seq.fold_left_s
             (fun tree (k, v) ->
               match v with
-              | Some v -> Store.Tree.add tree k v
-              | None -> Store.Tree.remove tree k)
+              | `Set v -> Store.Tree.add tree k v
+              | `Remove -> Store.Tree.remove tree k)
             tree items
         in
         if Store.Tree.is_empty tree then Lwt.return_none

@@ -35,7 +35,9 @@ module type S = sig
     ?parents:Store.Commit.t list ->
     ?strategy:[ `Set | `Merge | `Test_and_set ] ->
     info:Store.Info.f ->
-    (Store.path -> Store.contents -> Store.contents option Lwt.t) ->
+    (Store.path ->
+    Store.contents ->
+    [ `Set of Store.contents | `Remove ] option Lwt.t) ->
     Store.t ->
     Store.Path.t ->
     unit Lwt.t

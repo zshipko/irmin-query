@@ -63,7 +63,7 @@ let test_query store _ () =
 
 let test_update store _ () =
   let f _k v =
-    if v.User.age < 100 then Lwt.return_some { v with age = 100 }
+    if v.User.age < 100 then Lwt.return_some (`Set { v with age = 100 })
     else Lwt.return_none
   in
   let g _k v =
