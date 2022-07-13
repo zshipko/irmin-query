@@ -4,11 +4,6 @@ include Irmin_query_intf
 module Make (X : Irmin.Generic_key.S) = struct
   module Store = X
 
-  let rec _combine_paths prefix k =
-    match Store.Path.decons prefix with
-    | Some (step, path) -> _combine_paths path (Store.Path.cons step k)
-    | None -> k
-
   let init store prefix =
     let+ t = Store.get_tree store prefix in
     (prefix, t)
