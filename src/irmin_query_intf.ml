@@ -37,7 +37,7 @@ module type S = sig
     info:Store.Info.f ->
     (Store.path ->
     Store.contents ->
-    [ `Set of Store.contents | `Remove ] option Lwt.t) ->
+    [ `Update of Store.contents | `Remove ] option Lwt.t) ->
     Store.t ->
     Store.Path.t ->
     unit Lwt.t

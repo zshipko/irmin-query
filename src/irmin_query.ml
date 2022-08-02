@@ -132,7 +132,7 @@ module Make (X : Irmin.Generic_key.S) = struct
           Lwt_seq.fold_left_s
             (fun tree (k, v) ->
               match v with
-              | `Set v -> Store.Tree.add tree k v
+              | `Update v -> Store.Tree.add tree k v
               | `Remove -> Store.Tree.remove tree k)
             tree items
         in
